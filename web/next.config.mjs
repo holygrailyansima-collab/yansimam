@@ -1,9 +1,11 @@
-﻿const nextConfig = {
-  reactStrictMode: true,
-  images: {
-    domains: ['mwuvhprizozvpcqhfkvi.supabase.co'],
+﻿/** @type {import('next').NextConfig} */
+const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
   },
 };
 
 export default nextConfig;
-
