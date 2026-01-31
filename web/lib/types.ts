@@ -1,40 +1,85 @@
+// web/lib/types.ts
+
 export interface VotingSession {
   id: string
   user_id: string
+  unique_link: string
   photo_url: string
-  voting_link: string
+  qr_code_url?: string
+  start_time: string
+  end_time: string
   expires_at: string
-  total_votes: number
   status: 'active' | 'completed' | 'expired'
+  total_votes: number
+  approval_rate: number
+  average_score: number
+  score_courage: number
+  score_honesty: number
+  score_loyalty: number
+  score_work_ethic: number
+  score_discipline: number
   created_at: string
+  updated_at: string
 }
 
 export interface Vote {
   id: string
-  session_id: string
-  device_id: string
-  ip_address: string | null
-  trust_score: number
-  responsibility_score: number
-  communication_score: number
-  empathy_score: number
-  overall_score: number
-  verdict: 'approve' | 'reject'
+  voting_session_id: string
+  voter_ip_hash: string
+  voter_fingerprint_hash: string
+  score_courage: number
+  score_honesty: number
+  score_loyalty: number
+  score_work_ethic: number
+  score_discipline: number
+  average_score: number
   created_at: string
 }
 
 export interface Question {
   id: number
-  title: string
+  key: keyof Pick<
+    Vote,
+    | 'score_courage'
+    | 'score_honesty'
+    | 'score_loyalty'
+    | 'score_work_ethic'
+    | 'score_discipline'
+  >
+  text: string
   description: string
-  category: string
-  key: 'trust_score' | 'responsibility_score' | 'communication_score' | 'empathy_score' | 'overall_score'
 }
 
+// ✅ FIXED: 5 Questions matching SQL schema
 export const QUESTIONS: Question[] = [
-  { id: 1, title: 'Güvenilirlik', description: 'Bu kişiye ne kadar güvenirsiniz?', category: 'Trust', key: 'trust_score' },
-  { id: 2, title: 'Sorumluluk', description: 'Sorumluluklarını ne kadar yerine getirir?', category: 'Responsibility', key: 'responsibility_score' },
-  { id: 3, title: 'İletişim', description: 'İletişim becerileri ne kadar gelişmiş?', category: 'Communication', key: 'communication_score' },
-  { id: 4, title: 'Empati', description: 'Başkalarının duygularını ne kadar anlar?', category: 'Empathy', key: 'empathy_score' },
-  { id: 5, title: 'Genel Değerlendirme', description: 'Genel olarak bu kişiyi nasıl değerlendirirsiniz?', category: 'Overall', key: 'overall_score' },
+  {
+    id: 1,
+    key: 'score_courage',
+    text: 'Cesaret ve Risk Alma',
+    description: 'Bu kişinin zorluklar karşısında gösterdiği cesaret ve risk alma yeteneğini 0-10 arası değerlendirin',
+  },
+  {
+    id: 2,
+    key: 'score_honesty',
+    text: 'Dürüstlük ve Güvenilirlik',
+    description: 'Bu kişinin dürüstlük, güvenilirlik ve şeffaflık derecesini 0-10 arası değerlendirin',
+  },
+  {
+    id: 3,
+    key: 'score_loyalty',
+    text: 'Bağlılık ve Sadakat',
+    description: 'Bu kişinin bağlılık, sadakat ve güvenilirlik seviyesini 0-10 arası değerlendirin',
+  },
+  {
+    id: 4,
+    key: 'score_work_ethic',
+    text: 'Çalışma Azmi',
+    description: 'Bu kişinin çalışma azmi, üretkenlik ve gayret derecesini 0-10 arası değerlendirin',
+  },
+  {
+    id: 5,
+    key: 'score_discipline',
+    text: 'Öz Disiplin',
+    description: 'Bu kişinin öz disiplin, düzen ve sistemlilik seviyesini 0-10 arası değerlendirin',
+  },
 ]
