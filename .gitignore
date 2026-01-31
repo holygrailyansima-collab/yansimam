@@ -1,0 +1,13 @@
+mobile/.dart_tool/ 
+mobile/build/ 
+mobile/.flutter-plugins 
+mobile/.flutter-plugins-dependencies 
+web/node_modules/ 
+web/.next/ 
+web/.env.local 
+supabase/.branches/ 
+supabase/.temp/ 
+.env 
+*.log 
+google-services.json 
+GoogleService-Info.plist 
