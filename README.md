@@ -1,6 +1,20 @@
-# YANSIMAM v1 
- 
-## Project Structure 
-- mobile/ : Flutter (iOS + Android) 
-- web/ : Next.js 16 (Voting system) 
-- supabase/ : Backend (Database + Functions) 
+# YANSIMAM MVP
+
+Sosyal dogrulama platformu
+
+## Kurulum
+
+### Mobile
+cd mobile
+flutter pub get
+flutter run
+
+### Web
+cd web
+npm install
+npm run dev
+
+## API Keys
+
+- Supabase: .env dosyalarinda mevcut
+- Azure Face API: .env dosyalarinda mevcut

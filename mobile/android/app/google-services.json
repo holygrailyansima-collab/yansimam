@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "593663616110",
+    "project_id": "yansimam-867b4",
+    "storage_bucket": "yansimam-867b4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:593663616110:android:d6c13b11b4f0e70020327f",
+        "android_client_info": {
+          "package_name": "com.yansimam.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7A1PDDsh0uXuTAaFV3GWt1M6fHZ0DD1E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
