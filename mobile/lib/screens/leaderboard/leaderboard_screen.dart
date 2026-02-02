@@ -1,12 +1,24 @@
 // ============================================
 // File: lib/screens/leaderboard/leaderboard_screen.dart
-// PART 1/2 - State management and data loading
-// FIXED: Added constants.dart import for AppColors
+// PART 1/2 - State Management & Data Loading
+// FIXED: Premium logic - Everyone can view, only premium users listed
+// FIXED: No paywall, inner join fixed
 // ============================================
 
 import 'package:flutter/material.dart';
+import '../../core/config/supabase_config.dart';
 import '../../utils/constants.dart';
 
+/// Leaderboard Screen
+/// 
+/// Features:
+/// - Real-time leaderboard from Supabase
+/// - Anyone can view (no paywall)
+/// - Only premium users appear in list
+/// - User search functionality
+/// - Detailed user stats modal
+/// 
+/// FIXED: Premium logic corrected, production-ready
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
 
@@ -16,7 +28,8 @@ class LeaderboardScreen extends StatefulWidget {
 
 class _LeaderboardScreenState extends State<LeaderboardScreen> {
   bool isLoading = true;
-  bool isPremium = false;
+  bool currentUserIsPremium = false;
+  bool currentUserQualifies = false;
   List<LeaderboardUser> users = [];
   List<LeaderboardUser> filteredUsers = [];
   final searchController = TextEditingController();
@@ -33,99 +46,15 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     super.dispose();
   }
 
+  // ============================================
+  // LOAD LEADERBOARD FROM SUPABASE
+  // ============================================
+
   Future<void> _loadLeaderboard() async {
     setState(() => isLoading = true);
 
     try {
-      // TEST MODE - Check premium status and load fake data
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      // Simulate premium user (set to false to test paywall)
-      isPremium = true;
-
-      if (isPremium) {
-        // Fake leaderboard data
-        users = [
-          LeaderboardUser(
-            rank: 1,
-            fullName: 'Ayşe Demir',
-            username: 'aysedemir',
-            profileImageUrl: null,
-            averageScore: 9.2,
-            totalVotes: 156,
-            deservepageId: 48291034,
-            courageScore: 9.1,
-            honestyScore: 9.5,
-            loyaltyScore: 9.0,
-            workEthicScore: 9.3,
-            disciplineScore: 9.1,
-          ),
-          LeaderboardUser(
-            rank: 2,
-            fullName: 'Mehmet Kaya',
-            username: 'mehmetkaya',
-            profileImageUrl: null,
-            averageScore: 9.0,
-            totalVotes: 142,
-            deservepageId: 47382910,
-            courageScore: 8.9,
-            honestyScore: 9.2,
-            loyaltyScore: 8.8,
-            workEthicScore: 9.1,
-            disciplineScore: 8.9,
-          ),
-          LeaderboardUser(
-            rank: 3,
-            fullName: 'Ahmet Yılmaz',
-            username: 'ahmetyilmaz',
-            profileImageUrl: null,
-            averageScore: 8.9,
-            totalVotes: 138,
-            deservepageId: 46273819,
-            courageScore: 8.7,
-            honestyScore: 9.1,
-            loyaltyScore: 8.6,
-            workEthicScore: 9.0,
-            disciplineScore: 8.8,
-          ),
-          LeaderboardUser(
-            rank: 4,
-            fullName: 'Zeynep Arslan',
-            username: 'zeyneparslan',
-            profileImageUrl: null,
-            averageScore: 8.7,
-            totalVotes: 129,
-            deservepageId: 45182736,
-            courageScore: 8.5,
-            honestyScore: 8.9,
-            loyaltyScore: 8.4,
-            workEthicScore: 8.8,
-            disciplineScore: 8.7,
-          ),
-          LeaderboardUser(
-            rank: 5,
-            fullName: 'Can Öztürk',
-            username: 'canozturk',
-            profileImageUrl: null,
-            averageScore: 8.6,
-            totalVotes: 121,
-            deservepageId: 44091625,
-            courageScore: 8.4,
-            honestyScore: 8.8,
-            loyaltyScore: 8.3,
-            workEthicScore: 8.7,
-            disciplineScore: 8.6,
-          ),
-        ];
-
-        filteredUsers = users;
-      }
-
-      setState(() => isLoading = false);
-
-      /* PRODUCTION CODE
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
+      final user = SupabaseConfig.currentUser;
 
       if (user == null) {
         if (mounted) {
@@ -134,62 +63,104 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
         return;
       }
 
-      // Check premium status
-      final userData = await supabase
+      // ✅ NEW: Check current user's premium status and qualification
+      final userData = await SupabaseConfig.client
           .from('users')
-          .select('is_premium')
-          .eq('id', user.id)
-          .single();
+          .select('is_premium, status, total_votes, average_score')
+          .eq('auth_user_id', user.id)
+          .maybeSingle();
 
-      isPremium = userData['is_premium'] ?? false;
-
-      if (!isPremium) {
-        setState(() => isLoading = false);
-        return;
+      if (userData == null) {
+        throw Exception('Kullanıcı kaydı bulunamadı');
       }
 
-      // Fetch leaderboard
-      final leaderboardData = await supabase
+      currentUserIsPremium = userData['is_premium'] ?? false;
+      
+      // Check if user qualifies for leaderboard (approved + 50+ votes + 7.5+ score)
+      final status = userData['status'] as String?;
+      final totalVotes = userData['total_votes'] as int? ?? 0;
+      final avgScore = (userData['average_score'] as num?)?.toDouble() ?? 0.0;
+      
+      currentUserQualifies = status == 'approved' && 
+                            totalVotes >= 50 && 
+                            avgScore >= 7.5;
+
+      debugPrint('👤 Current user qualification:');
+      debugPrint('   Premium: $currentUserIsPremium');
+      debugPrint('   Qualifies: $currentUserQualifies');
+      debugPrint('   Status: $status, Votes: $totalVotes, Score: $avgScore');
+
+      // ✅ FIXED: Fetch leaderboard - Only show PREMIUM users
+      // Inner join removed to prevent null errors
+      final leaderboardData = await SupabaseConfig.client
           .from('users')
-          .select()
-          .eq('status', 'verified')
+          .select('''
+            id,
+            full_name,
+            username,
+            profile_photo_url,
+            deservepage_id,
+            total_votes,
+            average_score,
+            score_courage,
+            score_honesty,
+            score_loyalty,
+            score_work_ethic,
+            score_discipline
+          ''')
+          .eq('status', 'approved')
+          .eq('is_premium', true)
           .gte('total_votes', 50)
           .gte('average_score', 7.5)
-          .order('leaderboard_score', ascending: false)
-          .limit(50);
+          .order('average_score', ascending: false)
+          .order('total_votes', ascending: false)
+          .limit(100);
 
-      users = leaderboardData.map((item) {
-        return LeaderboardUser(
-          rank: 0, // Will be set after sorting
-          fullName: item['full_name'],
-          username: item['username'],
-          profileImageUrl: item['profile_image_url'],
-          averageScore: item['average_score'],
-          totalVotes: item['total_votes'],
-          deservepageId: item['deservepage_id'],
-          courageScore: item['courage_score'],
-          honestyScore: item['honesty_score'],
-          loyaltyScore: item['loyalty_score'],
-          workEthicScore: item['work_ethic_score'],
-          disciplineScore: item['discipline_score'],
-        );
-      }).toList();
+      if (mounted) {
+        users = leaderboardData.asMap().entries.map((entry) {
+          final index = entry.key;
+          final item = entry.value;
+          
+          return LeaderboardUser(
+            rank: index + 1, // Calculate rank based on order
+            fullName: item['full_name'] as String? ?? 'Unknown',
+            username: item['username'] as String? ?? 'unknown',
+            profileImageUrl: item['profile_photo_url'] as String?,
+            averageScore: (item['average_score'] as num?)?.toDouble() ?? 0.0,
+            totalVotes: item['total_votes'] as int? ?? 0,
+            deservepageId: item['deservepage_id'] as int? ?? 0,
+            courageScore: (item['score_courage'] as num?)?.toDouble() ?? 0.0,
+            honestyScore: (item['score_honesty'] as num?)?.toDouble() ?? 0.0,
+            loyaltyScore: (item['score_loyalty'] as num?)?.toDouble() ?? 0.0,
+            workEthicScore: (item['score_work_ethic'] as num?)?.toDouble() ?? 0.0,
+            disciplineScore: (item['score_discipline'] as num?)?.toDouble() ?? 0.0,
+          );
+        }).toList();
 
-      // Set ranks
-      for (int i = 0; i < users.length; i++) {
-        users[i].rank = i + 1;
+        filteredUsers = users;
+        setState(() => isLoading = false);
+        
+        debugPrint('✅ Leaderboard loaded: ${users.length} premium users');
       }
-
-      filteredUsers = users;
-      setState(() => isLoading = false);
-      */
     } catch (e) {
-      debugPrint('Error loading leaderboard: $e');
+      debugPrint('❌ Error loading leaderboard: $e');
+      
       if (mounted) {
         setState(() => isLoading = false);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Leaderboard yüklenirken hata oluştu: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
       }
     }
   }
+
+  // ============================================
+  // SEARCH USERS
+  // ============================================
 
   void _searchUsers(String query) {
     setState(() {
@@ -204,6 +175,10 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       }
     });
   }
+
+  // ============================================
+  // SHOW USER DETAIL MODAL
+  // ============================================
 
   void _showUserDetailModal(LeaderboardUser user) {
     showModalBottomSheet(
@@ -300,35 +275,36 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
             const SizedBox(height: 16),
 
             // DeservePage ID
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3),
+            if (user.deservepageId > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.verified_user,
+                      color: AppColors.primary,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'ID: ${user.deservepageId}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.verified_user,
-                    color: AppColors.primary,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'ID: ${user.deservepageId}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
 
             const SizedBox(height: 24),
 
@@ -383,7 +359,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   const SizedBox(height: 12),
                   _buildScoreRow('Bağlılık', user.loyaltyScore),
                   const SizedBox(height: 12),
-                  _buildScoreRow('Çalışma', user.workEthicScore),
+                  _buildScoreRow('Çalışkanlık', user.workEthicScore),
                   const SizedBox(height: 12),
                   _buildScoreRow('Disiplin', user.disciplineScore),
                 ],
@@ -459,7 +435,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: score / 10,
+              value: score > 0 ? (score / 10) : 0,
               minHeight: 8,
               backgroundColor: Colors.grey[200],
               valueColor: AlwaysStoppedAnimation<Color>(
@@ -476,7 +452,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
         SizedBox(
           width: 35,
           child: Text(
-            score.toStringAsFixed(1),
+            score > 0 ? score.toStringAsFixed(1) : '--',
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
@@ -488,8 +464,9 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       ],
     );
   }
+
   // ============================================
-  // PART 2/2 - UI Build Methods
+  // BUILD METHOD
   // ============================================
 
   @override
@@ -497,159 +474,131 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Leaderboard'),
+        title: const Text('Lider Tablosu'),
         backgroundColor: AppColors.secondary,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadLeaderboard,
+          ),
+        ],
       ),
       body: isLoading
           ? const Center(
               child: CircularProgressIndicator(color: AppColors.primary),
             )
-          : !isPremium
-              ? _buildPaywall()
-              : _buildLeaderboard(),
+          : Column(
+              children: [
+                // ✅ NEW: Show premium banner if user qualifies but not premium
+                if (currentUserQualifies && !currentUserIsPremium)
+                  _buildPremiumBanner(),
+                
+                Expanded(child: _buildLeaderboard()),
+              ],
+            ),
     );
   }
 
   // ============================================
-  // UI COMPONENTS - PAYWALL
+  // PART 2 CONTINUES WITH UI BUILDERS...
+  // ============================================
+  // ============================================
+  // PART 2/2 - UI BUILDERS
   // ============================================
 
-  Widget _buildPaywall() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(60),
-              ),
-              child: const Icon(
-                Icons.diamond,
-                size: 80,
-                color: AppColors.primary,
-              ),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'Premium Özellik',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: AppColors.secondary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Leaderboard\'u görüntülemek için Premium üyeliğe geçmelisiniz.',
-              style: TextStyle(
-                fontSize: 16,
-                color: AppColors.grey,
-                height: 1.5,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  _buildPremiumFeature(Icons.emoji_events, 'Leaderboard Erişimi'),
-                  const SizedBox(height: 12),
-                  _buildPremiumFeature(Icons.star, 'Profil Öne Çıkarma'),
-                  const SizedBox(height: 12),
-                  _buildPremiumFeature(Icons.all_inclusive, 'Kalıcı Aktif'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'Tek Seferlik Ödeme',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '₺149.99',
-              style: TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: AppColors.primary,
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Premium satın alma özelliği yakında eklenecek!'),
-                      backgroundColor: AppColors.primary,
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Premium Satın Al',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('Daha Sonra'),
-            ),
-          ],
+  // ============================================
+  // UI COMPONENTS - PREMIUM BANNER
+  // ============================================
+
+  Widget _buildPremiumBanner() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF009DE0), Color(0xFF004563)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-      ),
-    );
-  }
-
-  Widget _buildPremiumFeature(IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(icon, color: AppColors.primary, size: 22),
-        const SizedBox(width: 12),
-        Text(
-          text,
-          style: const TextStyle(
-            fontSize: 15,
-            color: AppColors.secondary,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF009DE0).withValues(alpha: 0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
           ),
-        ),
-      ],
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.diamond,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Listede Yer Alın!',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Premium ile leaderboard\'da görünün',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pushNamed('/premium');
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF009DE0),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Premium\'a Geç',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -699,23 +648,36 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                       const Icon(Icons.search_off, size: 64, color: AppColors.grey),
                       const SizedBox(height: 16),
                       Text(
-                        'Kullanıcı bulunamadı',
-                        style: TextStyle(
+                        searchController.text.isNotEmpty
+                            ? 'Kullanıcı bulunamadı'
+                            : 'Henüz leaderboard\'da kullanıcı yok',
+                        style: const TextStyle(
                           fontSize: 18,
+                          color: AppColors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Premium üyeler bu listede görünür',
+                        style: TextStyle(
+                          fontSize: 14,
                           color: AppColors.grey,
                         ),
                       ),
                     ],
                   ),
                 )
-              : ListView.builder(
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
-                  itemCount: filteredUsers.length,
-                  itemBuilder: (context, index) {
-                    final user = filteredUsers[index];
-                    return _buildUserCard(user);
-                  },
+              : RefreshIndicator(
+                  onRefresh: _loadLeaderboard,
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filteredUsers.length,
+                    itemBuilder: (context, index) {
+                      final user = filteredUsers[index];
+                      return _buildUserCard(user);
+                    },
+                  ),
                 ),
         ),
       ],
@@ -808,6 +770,8 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                         fontWeight: FontWeight.bold,
                         color: AppColors.secondary,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -892,7 +856,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 // ============================================
 
 class LeaderboardUser {
-  int rank;
+  final int rank;
   final String fullName;
   final String username;
   final String? profileImageUrl;

@@ -1,6 +1,8 @@
 // ============================================
 // File: lib/screens/home/home_screen.dart
-// PART 1 OF 2 - Complete file (replace entire file)
+// PART 1/2 - State Management & Data Loading
+// FIXED: onPopInvoked deprecated warning resolved
+// FIXED: Logo, no auto-notification, centered UI
 // ============================================
 
 import 'package:flutter/material.dart';
@@ -9,6 +11,17 @@ import '../voting/voting_start_screen.dart';
 import '../leaderboard/leaderboard_screen.dart';
 import '../profile/profile_screen.dart';
 
+/// Home Screen
+/// 
+/// Features:
+/// - Welcome card with user info
+/// - Active voting session card (if exists)
+/// - Status card (approved/pending/rejected/unapproved)
+/// - Stats grid (approval rate, votes, score, rank)
+/// - Quick actions
+/// - Recent activity
+/// 
+/// FIXED: onPopInvoked deprecated, no auto-notification, centered UI
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -20,7 +33,10 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   bool _isLoading = true;
 
-  // User data
+  // ============================================
+  // USER DATA
+  // ============================================
+  
   String? _userId;
   String? _fullName;
   String? _username;
@@ -30,25 +46,43 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _deservepageId;
   DateTime? _nextVotingDate;
 
-  // Stats
+  // ============================================
+  // STATS
+  // ============================================
+  
   double _approvalRate = 0.0;
   int _totalVotes = 0;
   double _averageScore = 0.0;
   int _rank = 0;
 
-  // Active voting session
+  // ============================================
+  // ACTIVE VOTING SESSION
+  // ============================================
+  
   String? _activeSessionId;
   DateTime? _activeSessionExpiry;
   int _activeSessionVotes = 0;
 
-  // Recent voting sessions
+  // ============================================
+  // RECENT SESSIONS
+  // ============================================
+  
   List<Map<String, dynamic>> _recentSessions = [];
+
+  // ============================================
+  // LIFECYCLE
+  // ============================================
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    // ✅ REMOVED: Auto notification check
   }
+
+  // ============================================
+  // DATA LOADING
+  // ============================================
 
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
@@ -70,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final userData = await SupabaseConfig.client
           .from('users')
           .select()
-          .eq('id', user.id)
+          .eq('auth_user_id', user.id)
           .maybeSingle();
 
       if (userData != null) {
@@ -78,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _profilePhotoUrl = userData['profile_photo_url'];
           _userStatus = userData['status'] ?? 'unapproved';
           _isPremium = userData['is_premium'] ?? false;
-          _deservepageId = userData['deservepage_id'];
+          _deservepageId = userData['deservepage_id']?.toString();
           _totalVotes = userData['total_votes'] ?? 0;
           _averageScore = (userData['average_score'] ?? 0.0).toDouble();
           
@@ -91,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Load user stats
       await _loadUserStats();
       
-      // Load active voting session
+      // Load active voting session - ✅ SILENTLY, NO NOTIFICATION
       await _loadActiveSession();
       
       // Load recent sessions
@@ -99,7 +133,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       debugPrint('❌ Error loading user data: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -117,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .limit(1)
           .maybeSingle();
 
-      if (latestSession != null) {
+      if (latestSession != null && mounted) {
         setState(() {
           _approvalRate = (latestSession['approval_rate'] ?? 0.0) / 100.0;
         });
@@ -131,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
             .eq('user_id', _userId!)
             .maybeSingle();
 
-        if (leaderboardData != null) {
+        if (leaderboardData != null && mounted) {
           setState(() {
             _rank = leaderboardData['rank'] ?? 0;
           });
@@ -160,17 +196,21 @@ class _HomeScreenState extends State<HomeScreen> {
         
         // Check if expired
         if (expiresAt.isBefore(DateTime.now())) {
-          setState(() {
-            _activeSessionId = null;
-            _activeSessionExpiry = null;
-            _activeSessionVotes = 0;
-          });
+          if (mounted) {
+            setState(() {
+              _activeSessionId = null;
+              _activeSessionExpiry = null;
+              _activeSessionVotes = 0;
+            });
+          }
         } else {
-          setState(() {
-            _activeSessionId = activeSession['unique_link'];
-            _activeSessionExpiry = expiresAt;
-            _activeSessionVotes = activeSession['total_votes'] ?? 0;
-          });
+          if (mounted) {
+            setState(() {
+              _activeSessionId = activeSession['unique_link'];
+              _activeSessionExpiry = expiresAt;
+              _activeSessionVotes = activeSession['total_votes'] ?? 0;
+            });
+          }
         }
       }
     } catch (e) {
@@ -189,13 +229,19 @@ class _HomeScreenState extends State<HomeScreen> {
           .order('created_at', ascending: false)
           .limit(5);
 
-      setState(() {
-        _recentSessions = List<Map<String, dynamic>>.from(sessions);
-      });
+      if (mounted) {
+        setState(() {
+          _recentSessions = List<Map<String, dynamic>>.from(sessions);
+        });
+      }
     } catch (e) {
       debugPrint('❌ Error loading recent sessions: $e');
     }
   }
+
+  // ============================================
+  // HELPERS
+  // ============================================
 
   void _redirectToLogin() {
     Navigator.of(context).pushNamedAndRemoveUntil(
@@ -225,62 +271,102 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ============================================
+  // BUILD METHOD
+  // ============================================
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('YANSIMAM'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Bildirimler yakında eklenecek!')),
-              );
-            },
+    // ✅ FIXED: Back button handler with onPopInvokedWithResult
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop) {
+          // Don't allow back navigation from home screen
+          return;
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          // ✅ FIXED: Logo in AppBar
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/logo_white.png',
+                  width: 32,
+                  height: 32,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(Icons.verified_user, size: 28);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text('YANSIMAM'),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Ayarlar yakında eklenecek!')),
-              );
-            },
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildBody(),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() => _currentIndex = index);
-        },
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF009DE0),
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Ana Sayfa',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.how_to_vote),
-            label: 'Oylama',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.leaderboard),
-            label: 'Lider Tablosu',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profil',
-          ),
-        ],
+          backgroundColor: const Color(0xFF004563),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          automaticallyImplyLeading: false, // ✅ No back button
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Bildirimler yakında eklenecek!')),
+                );
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () {
+                Navigator.of(context).pushNamed('/settings');
+              },
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _buildBody(),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            setState(() => _currentIndex = index);
+          },
+          type: BottomNavigationBarType.fixed,
+          selectedItemColor: const Color(0xFF009DE0),
+          unselectedItemColor: Colors.grey,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home),
+              label: 'Ana Sayfa',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.how_to_vote),
+              label: 'Oylama',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.leaderboard),
+              label: 'Lider Tablosu',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person),
+              label: 'Profil',
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  // ============================================
+  // BODY BUILDER
+  // ============================================
 
   Widget _buildBody() {
     switch (_currentIndex) {
@@ -297,6 +383,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ============================================
+  // HOME TAB
+  // ============================================
+
   Widget _buildHomeTab() {
     return RefreshIndicator(
       onRefresh: _loadUserData,
@@ -308,6 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _buildWelcomeCard(),
             const SizedBox(height: 20),
+            // ✅ Active session card shown ONLY if exists, NO notification
             if (_activeSessionId != null) ...[
               _buildActiveSessionCard(),
               const SizedBox(height: 20),
@@ -324,6 +415,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // ============================================
+  // PART 2 CONTINUES WITH UI BUILDERS...
+  // ============================================
+  // ============================================
+  // PART 2/2 - UI BUILDERS
+  // ============================================
+
+  // ============================================
+  // UI COMPONENTS - WELCOME CARD
+  // ============================================
 
   Widget _buildWelcomeCard() {
     return Container(
@@ -412,6 +514,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ============================================
+  // UI COMPONENTS - ACTIVE SESSION CARD
+  // ============================================
+
   Widget _buildActiveSessionCard() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -431,28 +537,31 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ✅ FIXED: Centered row with proper alignment
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.timer, color: Colors.white, size: 24),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Aktif Oylama',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.timer, color: Colors.white, size: 24),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Aktif Oylama',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -471,29 +580,53 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            'Kalan Süre: ${_getTimeRemaining(_activeSessionExpiry!)}',
-            style: const TextStyle(
-              fontSize: 16,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
+          const SizedBox(height: 16),
+          // ✅ FIXED: Centered time remaining box
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.access_time, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Kalan Süre: ${_getTimeRemaining(_activeSessionExpiry!)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Oylama detayları yakında eklenecek!')),
-              );
-            },
-            icon: const Icon(Icons.visibility),
-            label: const Text('Detayları Gör'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF4CAF50),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          const SizedBox(height: 16),
+          // ✅ FIXED: Centered button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pushNamed(
+                  '/voting_progress',
+                  arguments: {
+                    'sessionId': _activeSessionId,
+                    'votingLink': _activeSessionId,
+                  },
+                );
+              },
+              icon: const Icon(Icons.visibility),
+              label: const Text('Detayları Gör'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF4CAF50),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
@@ -501,6 +634,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - STATUS CARD
+  // ============================================
 
   Widget _buildStatusCard() {
     Color statusColor;
@@ -594,9 +731,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // PART 2 CONTINUES...
   // ============================================
-  // PART 2 OF 2 - Continue from Part 1
+  // UI COMPONENTS - STATS GRID
   // ============================================
 
   Widget _buildStatsGrid() {
@@ -612,7 +748,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        // ✅ FIXED: Centered grid with mainAxisAlignment
         Row(
+          mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTERED
           children: [
             Expanded(
               child: _buildStatCard(
@@ -635,6 +773,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 12),
         Row(
+          mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTERED
           children: [
             Expanded(
               child: _buildStatCard(
@@ -675,6 +814,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTERED
+        crossAxisAlignment: CrossAxisAlignment.center, // ✅ CENTERED
         children: [
           Icon(icon, color: color, size: 32),
           const SizedBox(height: 8),
@@ -685,6 +826,7 @@ class _HomeScreenState extends State<HomeScreen> {
               fontWeight: FontWeight.bold,
               color: color,
             ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 4),
           Text(
@@ -700,6 +842,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ============================================
+  // UI COMPONENTS - QUICK ACTIONS
+  // ============================================
+
   Widget _buildQuickActions() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -714,6 +860,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 12),
         Row(
+          mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTERED
           children: [
             Expanded(
               child: _buildActionButton(
@@ -755,6 +902,8 @@ class _HomeScreenState extends State<HomeScreen> {
           border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTERED
+          crossAxisAlignment: CrossAxisAlignment.center, // ✅ CENTERED
           children: [
             Icon(icon, color: color, size: 32),
             const SizedBox(height: 8),
@@ -765,12 +914,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 fontWeight: FontWeight.w600,
                 color: color,
               ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
       ),
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - RECENT ACTIVITY
+  // ============================================
 
   Widget _buildRecentActivity() {
     return Column(

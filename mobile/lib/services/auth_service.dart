@@ -1,15 +1,20 @@
 // ============================================
-// File: lib/services/auth/auth_service.dart
-// Authentication Service - Supabase Auth Wrapper
+// File: lib/services/auth_service.dart
+// COMPLETE: Native Google, Apple, Facebook Sign-In + All Auth Operations
 // ============================================
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'dart:io' show Platform;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../core/config/supabase_config.dart';
-import '../../models/user.dart' as app_user;
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import '../core/config/supabase_config.dart';
+import '../models/user.dart' as app_user;
 
 /// Authentication Service
-/// Helper service for authentication operations
+/// Handles all authentication operations including OAuth providers
 class AuthService {
   // Singleton pattern
   static final AuthService _instance = AuthService._internal();
@@ -39,7 +44,7 @@ class AuthService {
   /// Get auth state stream
   Stream<AuthState> get authStateChanges => _auth.onAuthStateChange;
 
-  // ==================== SIGN IN ====================
+  // ==================== EMAIL/PASSWORD SIGN IN ====================
 
   /// Sign in with email and password
   Future<AuthResponse> signInWithEmail({
@@ -60,7 +65,184 @@ class AuthService {
     }
   }
 
-  /// Sign in with OAuth provider
+  /// Sign in with username and password
+  Future<AuthResponse> signInWithUsername({
+    required String username,
+    required String password,
+  }) async {
+    try {
+      // Get email from username
+      final email = await getEmailFromUsername(username);
+      if (email == null) {
+        throw AuthException('Kullanıcı adı bulunamadı');
+      }
+
+      return await signInWithEmail(email: email, password: password);
+    } catch (e) {
+      debugPrint('❌ Username sign in failed: $e');
+      rethrow;
+    }
+  }
+
+  // ==================== GOOGLE SIGN IN ====================
+
+  /// Sign in with Google (Native SDK)
+  Future<AuthResponse> signInWithGoogle() async {
+    try {
+      debugPrint('🔐 Starting Google Sign-In...');
+
+      // Initialize Google Sign-In
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        scopes: ['email', 'profile'],
+      );
+
+      // Start sign-in flow
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        throw AuthException('Google sign-in cancelled by user');
+      }
+
+      debugPrint('✅ Google user signed in: ${googleUser.email}');
+
+      // Get authentication tokens
+      final googleAuth = await googleUser.authentication;
+      final accessToken = googleAuth.accessToken;
+      final idToken = googleAuth.idToken;
+
+      if (accessToken == null || idToken == null) {
+        throw AuthException('Google auth tokens are null');
+      }
+
+      debugPrint('✅ Got Google tokens, signing in to Supabase...');
+
+      // Sign in to Supabase with Google tokens
+      final response = await _auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+
+      // Ensure user record exists in database
+      if (response.user != null) {
+        await _ensureUserRecordExists(
+          authUser: response.user!,
+          provider: 'google',
+        );
+      }
+
+      debugPrint('✅ Google sign-in complete!');
+      return response;
+    } catch (e) {
+      debugPrint('❌ Google sign-in failed: $e');
+      rethrow;
+    }
+  }
+
+  // ==================== APPLE SIGN IN ====================
+
+  /// Sign in with Apple (Native SDK)
+  Future<AuthResponse> signInWithApple() async {
+    try {
+      debugPrint('🔐 Starting Apple Sign-In...');
+
+      // Check if Apple Sign-In is available
+      if (!await SignInWithApple.isAvailable()) {
+        throw AuthException('Apple Sign-In not available on this device');
+      }
+
+      // Start Apple Sign-In flow
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        // Android-specific configuration
+        webAuthenticationOptions: Platform.isAndroid
+            ? WebAuthenticationOptions(
+                clientId: 'com.yansimam.mobile',
+                redirectUri: Uri.parse(
+                  'https://mwuvhprizozvpcqhfkvi.supabase.co/auth/v1/callback',
+                ),
+              )
+            : null,
+      );
+
+      final idToken = credential.identityToken;
+      if (idToken == null) {
+        throw AuthException('Apple ID token is null');
+      }
+
+      debugPrint('✅ Got Apple ID token, signing in to Supabase...');
+
+      // Sign in to Supabase with Apple token
+      final response = await _auth.signInWithIdToken(
+        provider: OAuthProvider.apple,
+        idToken: idToken,
+      );
+
+      // Ensure user record exists
+      if (response.user != null) {
+        await _ensureUserRecordExists(
+          authUser: response.user!,
+          provider: 'apple',
+          fullName: credential.givenName != null && credential.familyName != null
+              ? '${credential.givenName} ${credential.familyName}'
+              : null,
+        );
+      }
+
+      debugPrint('✅ Apple sign-in complete!');
+      return response;
+    } catch (e) {
+      debugPrint('❌ Apple sign-in failed: $e');
+      rethrow;
+    }
+  }
+
+  // ==================== FACEBOOK SIGN IN ====================
+
+  /// Sign in with Facebook (Native SDK)
+  Future<AuthResponse> signInWithFacebook() async {
+    try {
+      debugPrint('🔐 Starting Facebook Sign-In...');
+
+      // Start Facebook login
+      final LoginResult result = await FacebookAuth.instance.login(
+        permissions: ['email', 'public_profile'],
+      );
+
+      if (result.status != LoginStatus.success) {
+        throw AuthException('Facebook login failed: ${result.status}');
+      }
+
+      final accessToken = result.accessToken!.tokenString;
+      debugPrint('✅ Got Facebook access token, signing in to Supabase...');
+
+      // Sign in to Supabase with Facebook token
+      final response = await _auth.signInWithIdToken(
+        provider: OAuthProvider.facebook,
+        idToken: accessToken,
+      );
+
+      // Ensure user record exists
+      if (response.user != null) {
+        await _ensureUserRecordExists(
+          authUser: response.user!,
+          provider: 'facebook',
+        );
+      }
+
+      debugPrint('✅ Facebook sign-in complete!');
+      return response;
+    } catch (e) {
+      debugPrint('❌ Facebook sign-in failed: $e');
+      rethrow;
+    }
+  }
+
+  // ==================== OAUTH (GENERIC) ====================
+
+  /// Sign in with OAuth provider (web-based flow)
   Future<bool> signInWithOAuth({
     required OAuthProvider provider,
   }) async {
@@ -75,7 +257,7 @@ class AuthService {
     }
   }
 
-  /// Sign in with ID token (Google, Apple, Facebook)
+  /// Sign in with ID token (for custom OAuth implementations)
   Future<AuthResponse> signInWithIdToken({
     required OAuthProvider provider,
     required String idToken,
@@ -98,21 +280,121 @@ class AuthService {
     }
   }
 
+  // ==================== USER RECORD MANAGEMENT ====================
+
+  /// Ensure user record exists in public.users table
+  Future<void> _ensureUserRecordExists({
+    required User authUser,
+    required String provider,
+    String? fullName,
+  }) async {
+    try {
+      debugPrint('📝 Checking if user record exists...');
+
+      // Check if user exists
+      final existing = await _client
+          .from('users')
+          .select('id')
+          .eq('id', authUser.id)
+          .maybeSingle();
+
+      if (existing != null) {
+        debugPrint('✅ User record already exists');
+        return;
+      }
+
+      debugPrint('📝 Creating new user record...');
+
+      // Generate username from email or metadata
+      String username = authUser.userMetadata?['username'] as String? ??
+          authUser.email!.split('@')[0];
+
+      // Check if username is taken
+      final usernameExists = await _client
+          .from('users')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+
+      if (usernameExists != null) {
+        // Append random suffix if username exists
+        username = '$username${authUser.id.substring(0, 4)}';
+      }
+
+      // Get full name
+      final displayName = fullName ??
+          authUser.userMetadata?['full_name'] as String? ??
+          authUser.userMetadata?['name'] as String? ??
+          username;
+
+      // Get profile photo
+      final profilePhoto = authUser.userMetadata?['avatar_url'] as String? ??
+          authUser.userMetadata?['picture'] as String? ??
+          authUser.userMetadata?['profile_photo_url'] as String?;
+
+      // Create user record
+      await _client.from('users').insert({
+        'id': authUser.id,
+        'email': authUser.email!,
+        'username': username,
+        'full_name': displayName,
+        'profile_photo_url': profilePhoto,
+        'status': 'unapproved',
+        'is_premium': false,
+        'average_score': 0.0,
+        'total_votes': 0,
+        'auth_provider': provider,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      debugPrint('✅ User record created successfully');
+    } catch (e) {
+      debugPrint('❌ Error creating user record: $e');
+      // Don't throw - allow login to proceed even if user creation fails
+    }
+  }
+
   // ==================== SIGN UP ====================
 
   /// Sign up with email and password
   Future<AuthResponse> signUp({
     required String email,
     required String password,
-    Map<String, dynamic>? data,
+    required String username,
+    required String fullName,
+    Map<String, dynamic>? additionalData,
   }) async {
     try {
       debugPrint('📝 Signing up user: $email');
+
+      // Check if username is available
+      final isAvailable = await isUsernameAvailable(username);
+      if (!isAvailable) {
+        throw AuthException('Kullanıcı adı zaten kullanımda');
+      }
+
+      // Sign up with Supabase Auth
       final response = await _auth.signUp(
         email: email,
         password: password,
-        data: data,
+        data: {
+          'username': username,
+          'full_name': fullName,
+          ...?additionalData,
+        },
       );
+
+      // Create user record
+      if (response.user != null) {
+        await createUserRecord(
+          userId: response.user!.id,
+          email: email,
+          username: username,
+          fullName: fullName,
+        );
+      }
+
       debugPrint('✅ Sign up successful: ${response.user?.id}');
       return response;
     } catch (e) {
@@ -127,7 +409,27 @@ class AuthService {
   Future<void> signOut() async {
     try {
       debugPrint('🚪 Signing out user: $currentUserId');
+
+      // Sign out from Google if logged in with Google
+      try {
+        final googleSignIn = GoogleSignIn();
+        if (await googleSignIn.isSignedIn()) {
+          await googleSignIn.signOut();
+        }
+      } catch (e) {
+        debugPrint('⚠️ Google sign out failed: $e');
+      }
+
+      // Sign out from Facebook if logged in with Facebook
+      try {
+        await FacebookAuth.instance.logOut();
+      } catch (e) {
+        debugPrint('⚠️ Facebook sign out failed: $e');
+      }
+
+      // Sign out from Supabase
       await _auth.signOut();
+
       debugPrint('✅ Sign out successful');
     } catch (e) {
       debugPrint('❌ Sign out failed: $e');
@@ -205,10 +507,7 @@ class AuthService {
   }) async {
     try {
       debugPrint('📝 Updating user data: $userId');
-      await _client
-          .from('users')
-          .update(data)
-          .eq('id', userId);
+      await _client.from('users').update(data).eq('id', userId);
       debugPrint('✅ User data updated successfully');
     } catch (e) {
       debugPrint('❌ Failed to update user data: $e');
@@ -228,8 +527,8 @@ class AuthService {
   Future<void> createUserRecord({
     required String userId,
     required String email,
-    required String fullName,
     required String username,
+    required String fullName,
     String? profilePhotoUrl,
   }) async {
     try {
@@ -237,8 +536,8 @@ class AuthService {
       await _client.from('users').insert({
         'id': userId,
         'email': email,
-        'full_name': fullName,
         'username': username,
+        'full_name': fullName,
         'profile_photo_url': profilePhotoUrl,
         'status': 'unapproved',
         'is_premium': false,
@@ -357,10 +656,10 @@ class AuthService {
   bool get isSessionValid {
     final session = currentSession;
     if (session == null) return false;
-    
+
     final expiresAt = session.expiresAt;
     if (expiresAt == null) return false;
-    
+
     return DateTime.now().isBefore(
       DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000),
     );
@@ -374,73 +673,18 @@ class AuthService {
 
     try {
       debugPrint('🗑️ Deleting user account: $currentUserId');
-      
-      // 1. Delete user data from database
-      await _client
-          .from('users')
-          .delete()
-          .eq('id', currentUserId!);
 
-      // 2. Delete auth user (requires admin privileges)
-      // This should be done via Supabase Edge Function
-      // For now, just sign out
+      // Delete user data from database
+      await _client.from('users').delete().eq('id', currentUserId!);
+
+      // Sign out (auth user deletion requires admin privileges)
       await signOut();
-      
+
       debugPrint('✅ Account deleted successfully');
     } catch (e) {
       debugPrint('❌ Failed to delete account: $e');
       throw Exception('Failed to delete account: $e');
     }
-  }
-
-  // ==================== ERROR HANDLING ====================
-
-  /// Get user-friendly error message
-  String getErrorMessage(Object error) {
-    if (error is AuthException) {
-      switch (error.statusCode) {
-        case '400':
-          return 'Geçersiz e-posta veya şifre';
-        case '422':
-          return 'Bu e-posta adresi zaten kullanımda';
-        case '401':
-          return 'E-posta veya şifre hatalı';
-        case '404':
-          return 'Kullanıcı bulunamadı';
-        case '429':
-          return 'Çok fazla deneme. Lütfen daha sonra tekrar deneyin';
-        default:
-          return error.message;
-      }
-    }
-    return 'Beklenmeyen bir hata oluştu';
-  }
-
-  // ==================== VALIDATION ====================
-
-  /// Validate email format
-  bool isValidEmail(String email) {
-    final emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    );
-    return emailRegex.hasMatch(email);
-  }
-
-  /// Validate password strength
-  bool isStrongPassword(String password) {
-    // At least 8 characters, 1 uppercase, 1 lowercase, 1 number
-    if (password.length < 8) return false;
-    if (!password.contains(RegExp(r'[A-Z]'))) return false;
-    if (!password.contains(RegExp(r'[a-z]'))) return false;
-    if (!password.contains(RegExp(r'[0-9]'))) return false;
-    return true;
-  }
-
-  /// Validate username format
-  bool isValidUsername(String username) {
-    // 3-20 characters, alphanumeric and underscore only
-    final usernameRegex = RegExp(r'^[a-zA-Z0-9_]{3,20}$');
-    return usernameRegex.hasMatch(username);
   }
 
   // ==================== PREMIUM ====================
@@ -481,5 +725,55 @@ class AuthService {
   Future<bool> isApproved() async {
     final userData = await getCurrentUserData();
     return userData?.isApproved ?? false;
+  }
+
+  // ==================== ERROR HANDLING ====================
+
+  /// Get user-friendly error message
+  String getErrorMessage(Object error) {
+    if (error is AuthException) {
+      if (error.message.contains('Invalid login credentials')) {
+        return 'E-posta veya şifre hatalı';
+      }
+      if (error.message.contains('Email not confirmed')) {
+        return 'Lütfen e-postanızı doğrulayın';
+      }
+      if (error.message.contains('User already registered')) {
+        return 'Bu e-posta adresi zaten kullanımda';
+      }
+      if (error.message.contains('cancelled')) {
+        return 'Giriş iptal edildi';
+      }
+      return error.message;
+    }
+    if (error is PlatformException) {
+      return 'Sistem hatası: ${error.message}';
+    }
+    return 'Beklenmeyen bir hata oluştu';
+  }
+
+  // ==================== VALIDATION ====================
+
+  /// Validate email format
+  bool isValidEmail(String email) {
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+    );
+    return emailRegex.hasMatch(email);
+  }
+
+  /// Validate password strength
+  bool isStrongPassword(String password) {
+    if (password.length < 8) return false;
+    if (!password.contains(RegExp(r'[A-Z]'))) return false;
+    if (!password.contains(RegExp(r'[a-z]'))) return false;
+    if (!password.contains(RegExp(r'[0-9]'))) return false;
+    return true;
+  }
+
+  /// Validate username format
+  bool isValidUsername(String username) {
+    final usernameRegex = RegExp(r'^[a-zA-Z0-9_]{3,20}$');
+    return usernameRegex.hasMatch(username);
   }
 }

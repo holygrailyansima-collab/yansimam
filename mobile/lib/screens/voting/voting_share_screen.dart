@@ -1,6 +1,7 @@
 // ============================================
 // File: lib/screens/voting/voting_share_screen.dart
-// PART 1/2 - Real-time vote tracking with VotingService
+// FIXED: Centered timer card + onPopInvokedWithResult
+// PART 1/2
 // ============================================
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,16 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:async';
 import '../../services/voting_service.dart';
 
+/// Voting Share Screen
+/// 
+/// Features:
+/// - Real-time vote tracking
+/// - QR code generation
+/// - Social media sharing
+/// - Countdown timer
+/// - Live stats updates
+/// 
+/// FIXED: Centered timer card + proper navigation
 class VotingShareScreen extends StatefulWidget {
   final String votingLink;
   final String sessionId;
@@ -44,6 +55,10 @@ class _VotingShareScreenState extends State<VotingShareScreen> {
   double _scoreDiscipline = 0.0;
 
   StreamSubscription? _voteUpdatesSubscription;
+
+  // ============================================
+  // LIFECYCLE METHODS
+  // ============================================
 
   @override
   void initState() {
@@ -120,7 +135,7 @@ class _VotingShareScreenState extends State<VotingShareScreen> {
         actions: [
           ElevatedButton(
             onPressed: () {
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF009DE0),
@@ -268,71 +283,90 @@ Teşekkürler! 💙
   }
 
   // ============================================
-  // BUILD METHOD
+  // NAVIGATE TO HOME
+  // ============================================
+
+  void _navigateToHome() {
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+  }
+
+  // ============================================
+  // BUILD METHOD (FIXED: onPopInvokedWithResult)
   // ============================================
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F9FC),
-      appBar: AppBar(
-        title: const Text('Linki Paylaş'),
-        backgroundColor: const Color(0xFF004563),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: _isLoadingVotes
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  )
-                : const Icon(Icons.refresh),
-            onPressed: _isLoadingVotes ? null : _refreshStats,
+    // ✅ FIXED: onPopInvoked → onPopInvokedWithResult
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop) {
+          _navigateToHome();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF4F9FC),
+        appBar: AppBar(
+          title: const Text('Linki Paylaş'),
+          backgroundColor: const Color(0xFF004563),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: _navigateToHome,
           ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refreshStats,
-        color: const Color(0xFF009DE0),
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTimerCard(),
-                const SizedBox(height: 20),
-                _buildVoteStatsCard(),
-                const SizedBox(height: 24),
-                if (_totalVotes > 0) ...[
-                  _buildDetailedScoresCard(),
+          actions: [
+            IconButton(
+              icon: _isLoadingVotes
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.refresh),
+              onPressed: _isLoadingVotes ? null : _refreshStats,
+            ),
+            IconButton(
+              icon: const Icon(Icons.home),
+              onPressed: _navigateToHome,
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: _refreshStats,
+          color: const Color(0xFF009DE0),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTimerCard(),
+                  const SizedBox(height: 20),
+                  _buildVoteStatsCard(),
                   const SizedBox(height: 24),
+                  if (_totalVotes > 0) ...[
+                    _buildDetailedScoresCard(),
+                    const SizedBox(height: 24),
+                  ],
+                  _buildQRCodeCard(),
+                  const SizedBox(height: 24),
+                  _buildLinkCard(),
+                  const SizedBox(height: 24),
+                  _buildShareOptionsTitle(),
+                  const SizedBox(height: 16),
+                  _buildSocialMediaButtons(),
+                  const SizedBox(height: 24),
+                  _buildTipsSection(),
+                  const SizedBox(height: 24),
+                  _buildDoneButton(),
+                  const SizedBox(height: 40),
                 ],
-                _buildQRCodeCard(),
-                const SizedBox(height: 24),
-                _buildLinkCard(),
-                const SizedBox(height: 24),
-                _buildShareOptionsTitle(),
-                const SizedBox(height: 16),
-                _buildSocialMediaButtons(),
-                const SizedBox(height: 24),
-                _buildTipsSection(),
-                const SizedBox(height: 24),
-                _buildDoneButton(),
-                const SizedBox(height: 40),
-              ],
+              ),
             ),
           ),
         ),
@@ -341,7 +375,7 @@ Teşekkürler! 💙
   }
 
   // ============================================
-  // UI COMPONENTS - TIMER CARD
+  // UI COMPONENTS - TIMER CARD (FIXED: FULLY CENTERED)
   // ============================================
 
   Widget _buildTimerCard() {
@@ -369,6 +403,9 @@ Teşekkürler! 💙
         ],
       ),
       child: Column(
+        // ✅ FIX: Tüm içerik ortalandı
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(
             isUrgent ? Icons.warning_amber : Icons.timer,
@@ -378,7 +415,11 @@ Teşekkürler! 💙
           const SizedBox(height: 12),
           Text(
             isUrgent ? 'Süre Azalıyor!' : 'Kalan Süre',
-            style: const TextStyle(fontSize: 16, color: Colors.white70),
+            style: const TextStyle(
+              fontSize: 16,
+              color: Colors.white70,
+            ),
+            textAlign: TextAlign.center, // ✅ Text ortalandı
           ),
           const SizedBox(height: 8),
           Text(
@@ -389,28 +430,32 @@ Teşekkürler! 💙
               color: Colors.white,
               letterSpacing: 1,
             ),
+            textAlign: TextAlign.center, // ✅ Text ortalandı
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.people, color: Colors.white, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  'Hedef: 50 oy • Toplam: $_totalVotes oy',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
+          // ✅ FIX: Container ortalandı
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min, // ✅ Content-based width
+                children: [
+                  const Icon(Icons.people, color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Hedef: 50 oy • Toplam: $_totalVotes oy',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -571,6 +616,8 @@ Teşekkürler! 💙
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center, // ✅ Centered
+        crossAxisAlignment: CrossAxisAlignment.center, // ✅ Centered
         children: [
           Icon(icon, color: color, size: 24),
           const SizedBox(height: 8),
@@ -596,6 +643,7 @@ Teşekkürler! 💙
       ),
     );
   }
+
   // ============================================
   // UI COMPONENTS - DETAILED SCORES CARD
   // ============================================
@@ -693,7 +741,6 @@ Teşekkürler! 💙
       ],
     );
   }
-
   // ============================================
   // UI COMPONENTS - QR CODE CARD
   // ============================================
@@ -974,6 +1021,8 @@ Teşekkürler! 💙
           ],
         ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center, // ✅ Centered
+          crossAxisAlignment: CrossAxisAlignment.center, // ✅ Centered
           children: [
             Container(
               padding: const EdgeInsets.all(14),
@@ -991,6 +1040,7 @@ Teşekkürler! 💙
                 fontWeight: FontWeight.w600,
                 color: color,
               ),
+              textAlign: TextAlign.center, // ✅ Centered
             ),
           ],
         ),
@@ -1073,9 +1123,7 @@ Teşekkürler! 💙
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: () {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        },
+        onPressed: _navigateToHome,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF009DE0),
           foregroundColor: Colors.white,

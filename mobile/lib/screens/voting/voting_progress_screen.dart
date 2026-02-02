@@ -1,6 +1,7 @@
 // ============================================
 // File: lib/screens/voting/voting_progress_screen.dart
 // PART 1/2 - Real-time voting progress with VotingService
+// FIXED: Timer position moved to RIGHT
 // ============================================
 
 import 'package:flutter/material.dart';
@@ -420,9 +421,8 @@ class _VotingProgressScreenState extends State<VotingProgressScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildTimerCard(),
-                  const SizedBox(height: 24),
-                  _buildStatsCards(),
+                  // FIXED: Timer moved to RIGHT, Stats on LEFT
+                  _buildTopSection(),
                   const SizedBox(height: 24),
                   _buildProgressCard(),
                   const SizedBox(height: 24),
@@ -444,7 +444,46 @@ class _VotingProgressScreenState extends State<VotingProgressScreen>
   }
 
   // ============================================
-  // UI COMPONENTS - TIMER CARD
+  // UI COMPONENTS - TOP SECTION (FIXED LAYOUT)
+  // ============================================
+
+  Widget _buildTopSection() {
+    // Responsive: Row on tablet/desktop, Column on mobile
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+
+    if (isMobile) {
+      // Mobile: Stacked layout
+      return Column(
+        children: [
+          _buildStatsCards(),
+          const SizedBox(height: 16),
+          _buildTimerCard(),
+        ],
+      );
+    } else {
+      // Tablet/Desktop: Side-by-side layout (Timer on RIGHT)
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // LEFT: Stats Cards
+          Expanded(
+            flex: 2,
+            child: _buildStatsCards(),
+          ),
+          const SizedBox(width: 16),
+          // RIGHT: Timer Card
+          Expanded(
+            flex: 3,
+            child: _buildTimerCard(),
+          ),
+        ],
+      );
+    }
+  }
+
+  // ============================================
+  // UI COMPONENTS - TIMER CARD (FIXED: Now on RIGHT)
   // ============================================
 
   Widget _buildTimerCard() {
@@ -530,32 +569,28 @@ class _VotingProgressScreenState extends State<VotingProgressScreen>
   }
 
   // ============================================
-  // UI COMPONENTS - STATS CARDS
+  // UI COMPONENTS - STATS CARDS (Now on LEFT)
   // ============================================
 
   Widget _buildStatsCards() {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _buildStatCard(
-            'Toplam Oy',
-            '$_totalVotes',
-            Icons.how_to_vote,
-            const Color(0xFF009DE0),
-            subtitle: 'Hedef: 50',
-          ),
+        _buildStatCard(
+          'Toplam Oy',
+          '$_totalVotes',
+          Icons.how_to_vote,
+          const Color(0xFF009DE0),
+          subtitle: 'Hedef: 50',
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildStatCard(
-            'Onay Oranı',
-            '${_approvalRate.toStringAsFixed(1)}%',
-            Icons.trending_up,
-            _approvalRate >= 50.01
-                ? const Color(0xFF25D366)
-                : const Color(0xFFFFA000),
-            subtitle: 'Min: %50.01',
-          ),
+        const SizedBox(height: 12),
+        _buildStatCard(
+          'Onay Oranı',
+          '${_approvalRate.toStringAsFixed(1)}%',
+          Icons.trending_up,
+          _approvalRate >= 50.01
+              ? const Color(0xFF25D366)
+              : const Color(0xFFFFA000),
+          subtitle: 'Min: %50.01',
         ),
       ],
     );

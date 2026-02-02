@@ -1,6 +1,6 @@
 // ============================================
 // File: lib/screens/auth/login_screen.dart
-// With safety check for public.users table
+// FIXED: Logo now uses Image.asset instead of Text('Y')
 // ============================================
 
 import 'dart:io' show Platform;
@@ -20,8 +20,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
-  bool _isLoading = false;
-  bool _showEmailLogin = false;
+  bool isLoading = false;
+  bool showEmailLogin = false;
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -52,10 +52,12 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  // ⚡ NEW: SAFETY CHECK - Ensure user exists in public.users
+  // ============================================
+  // NEW SAFETY CHECK - Ensure user exists in public.users
+  // ============================================
+
   Future<void> _ensureUserRecordExists(User authUser) async {
     try {
-      // Check if user exists in public.users
       final userData = await SupabaseConfig.client
           .from('users')
           .select('id')
@@ -63,13 +65,11 @@ class _LoginScreenState extends State<LoginScreen>
           .maybeSingle();
 
       if (userData == null) {
-        debugPrint('⚠️ User missing in public.users, creating...');
+        debugPrint('User missing in public.users, creating...');
 
-        // Get username from metadata or email
-        String username = authUser.userMetadata?['username'] as String? ?? 
-                         authUser.email!.split('@')[0];
+        String username = authUser.userMetadata?['username'] as String? ??
+            authUser.email!.split('@')[0];
 
-        // Make username unique if needed
         final existingUser = await SupabaseConfig.client
             .from('users')
             .select('id')
@@ -77,16 +77,14 @@ class _LoginScreenState extends State<LoginScreen>
             .maybeSingle();
 
         if (existingUser != null) {
-          username = '${username}_${authUser.id.substring(0, 4)}';
+          username = '$username${authUser.id.substring(0, 4)}';
         }
 
-        // Create missing user record
         await SupabaseConfig.client.from('users').insert({
           'auth_user_id': authUser.id,
           'email': authUser.email!,
           'username': username,
-          'full_name': authUser.userMetadata?['full_name'] ?? 
-                      authUser.email!.split('@')[0],
+          'full_name': authUser.userMetadata?['full_name'] ?? authUser.email!.split('@')[0],
           'profile_photo_url': authUser.userMetadata?['avatar_url'],
           'status': 'unapproved',
           'is_premium': false,
@@ -102,20 +100,22 @@ class _LoginScreenState extends State<LoginScreen>
       }
     } catch (e) {
       debugPrint('❌ Error ensuring user record: $e');
-      // Don't throw - allow login to continue
     }
   }
 
-  // EMAIL OR USERNAME LOGIN (UPDATED WITH SAFETY CHECK)
+  // ============================================
+  // EMAIL/USERNAME LOGIN
+  // ============================================
+
   Future<void> _signInWithEmail() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    setState(() => isLoading = true);
+
     try {
       final input = _emailController.text.trim();
       String email = input;
 
-      // If no @ symbol, search for username in users table
       if (!input.contains('@')) {
         try {
           final userData = await SupabaseConfig.client
@@ -125,19 +125,14 @@ class _LoginScreenState extends State<LoginScreen>
               .maybeSingle();
 
           if (userData == null) {
-            if (mounted) {
-              _showErrorSnackBar('Kullanıcı adı bulunamadı');
-            }
-            setState(() => _isLoading = false);
+            if (mounted) _showErrorSnackBar('Kullanıcı adı bulunamadı');
+            setState(() => isLoading = false);
             return;
           }
-
           email = userData['email'];
         } catch (e) {
-          if (mounted) {
-            _showErrorSnackBar('Kullanıcı adı sorgulanırken hata: $e');
-          }
-          setState(() => _isLoading = false);
+          if (mounted) _showErrorSnackBar('Kullanıcı adı sorgulanırken hata: $e');
+          setState(() => isLoading = false);
           return;
         }
       }
@@ -148,44 +143,38 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (response.user != null) {
-        // ⚡ SAFETY CHECK: Ensure user exists in public.users
         await _ensureUserRecordExists(response.user!);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('✅ Giriş başarılı!'),
+              content: Text('Giriş başarılı!'),
               backgroundColor: Color(0xFF25D366),
               duration: Duration(seconds: 1),
             ),
           );
-
           await Future.delayed(const Duration(milliseconds: 500));
-
           if (mounted) {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              '/home',
-              (route) => false,
-            );
+            Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
           }
         }
       }
     } on AuthException catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Giriş hatası: ${e.message}');
-      }
+      if (mounted) _showErrorSnackBar('Giriş hatası: ${e.message}');
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Beklenmeyen hata: $e');
-      }
+      if (mounted) _showErrorSnackBar('Beklenmeyen hata: $e');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  // GOOGLE SIGN IN (WITH SAFETY CHECK)
+  // ============================================
+  // GOOGLE SIGN IN
+  // ============================================
+
   Future<void> _signInWithGoogle() async {
-    setState(() => _isLoading = true);
+    setState(() => isLoading = true);
+
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn(
         scopes: ['email', 'profile'],
@@ -193,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen>
 
       final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
-        setState(() => _isLoading = false);
+        setState(() => isLoading = false);
         return;
       }
 
@@ -212,28 +201,25 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (response.user != null) {
-        // ⚡ SAFETY CHECK
         await _ensureUserRecordExists(response.user!);
-
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/home',
-            (route) => false,
-          );
+          Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
         }
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Google ile giriş hatası: $e');
-      }
+      if (mounted) _showErrorSnackBar('Google ile giriş hatası: $e');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  // APPLE SIGN IN (WITH SAFETY CHECK)
+  // ============================================
+  // APPLE SIGN IN
+  // ============================================
+
   Future<void> _signInWithApple() async {
-    setState(() => _isLoading = true);
+    setState(() => isLoading = true);
+
     try {
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [
@@ -244,16 +230,13 @@ class _LoginScreenState extends State<LoginScreen>
             ? WebAuthenticationOptions(
                 clientId: 'com.yansimam.mobile',
                 redirectUri: Uri.parse(
-                  'https://mwuvhprizozvpcqhfkvi.supabase.co/auth/v1/callback',
-                ),
+                    'https://mwuvhprizozvpcqhfkvi.supabase.co/auth/v1/callback'),
               )
             : null,
       );
 
       final idToken = credential.identityToken;
-      if (idToken == null) {
-        throw 'Apple ID token is null';
-      }
+      if (idToken == null) throw 'Apple ID token is null';
 
       final response = await SupabaseConfig.auth.signInWithIdToken(
         provider: OAuthProvider.apple,
@@ -261,28 +244,25 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (response.user != null) {
-        // ⚡ SAFETY CHECK
         await _ensureUserRecordExists(response.user!);
-
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/home',
-            (route) => false,
-          );
+          Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
         }
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Apple ile giriş hatası: $e');
-      }
+      if (mounted) _showErrorSnackBar('Apple ile giriş hatası: $e');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  // FACEBOOK SIGN IN (WITH SAFETY CHECK)
+  // ============================================
+  // FACEBOOK SIGN IN
+  // ============================================
+
   Future<void> _signInWithFacebook() async {
-    setState(() => _isLoading = true);
+    setState(() => isLoading = true);
+
     try {
       final LoginResult result = await FacebookAuth.instance.login();
 
@@ -295,27 +275,23 @@ class _LoginScreenState extends State<LoginScreen>
         );
 
         if (response.user != null) {
-          // ⚡ SAFETY CHECK
           await _ensureUserRecordExists(response.user!);
-
           if (mounted) {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              '/home',
-              (route) => false,
-            );
+            Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
           }
         }
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Facebook ile giriş hatası: $e');
-      }
+      if (mounted) _showErrorSnackBar('Facebook ile giriş hatası: $e');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
+  // ============================================
   // PLACEHOLDER FOR OTHER PROVIDERS
+  // ============================================
+
   Future<void> _signInWithProvider(String provider) async {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -338,6 +314,10 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  // ============================================
+  // BUILD METHOD
+  // ============================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -353,7 +333,7 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
         child: SafeArea(
-          child: _isLoading
+          child: isLoading
               ? const Center(
                   child: CircularProgressIndicator(
                     color: Colors.white,
@@ -368,7 +348,9 @@ class _LoginScreenState extends State<LoginScreen>
                       children: [
                         const SizedBox(height: 60),
 
-                        // Logo
+                        // ============================================
+                        // LOGO - FIXED: Now uses Image.asset
+                        // ============================================
                         Container(
                           width: 110,
                           height: 110,
@@ -384,14 +366,24 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                             ],
                           ),
-                          child: const Center(
-                            child: Text(
-                              'Y',
-                              style: TextStyle(
-                                fontSize: 58,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF009DE0),
-                              ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(28),
+                            child: Image.asset(
+                              'assets/images/logo.png',
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) {
+                                // Fallback if logo not found
+                                return const Center(
+                                  child: Text(
+                                    'Y',
+                                    style: TextStyle(
+                                      fontSize: 58,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF009DE0),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ),
@@ -431,7 +423,7 @@ class _LoginScreenState extends State<LoginScreen>
                         const SizedBox(height: 40),
 
                         // EMAIL/USERNAME LOGIN FORM
-                        if (_showEmailLogin)
+                        if (showEmailLogin)
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
@@ -498,12 +490,10 @@ class _LoginScreenState extends State<LoginScreen>
                                     child: ElevatedButton(
                                       onPressed: _signInWithEmail,
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor:
-                                            const Color(0xFF009DE0),
+                                        backgroundColor: const Color(0xFF009DE0),
                                         foregroundColor: Colors.white,
                                         shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(12),
                                         ),
                                       ),
                                       child: const Text(
@@ -518,12 +508,11 @@ class _LoginScreenState extends State<LoginScreen>
                                   const SizedBox(height: 12),
                                   TextButton(
                                     onPressed: () {
-                                      setState(() => _showEmailLogin = false);
+                                      setState(() => showEmailLogin = false);
                                     },
                                     child: const Text(
                                       'Sosyal Medya ile Giriş Yap',
-                                      style:
-                                          TextStyle(color: Color(0xFF009DE0)),
+                                      style: TextStyle(color: Color(0xFF009DE0)),
                                     ),
                                   ),
                                 ],
@@ -533,13 +522,14 @@ class _LoginScreenState extends State<LoginScreen>
                         else
                           Column(
                             children: [
+                              // Email login button
                               _buildPremiumOAuthButton(
                                 'E-posta ile Giriş Yap',
                                 '',
                                 Colors.white,
                                 const Color(0xFF004563),
                                 () {
-                                  setState(() => _showEmailLogin = true);
+                                  setState(() => showEmailLogin = true);
                                 },
                                 icon: Icons.email,
                               ),
@@ -556,8 +546,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                                   ),
                                   Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
                                     child: Text(
                                       'veya',
                                       style: TextStyle(
@@ -586,10 +575,9 @@ class _LoginScreenState extends State<LoginScreen>
                                 _signInWithGoogle,
                                 icon: Icons.g_mobiledata,
                               ),
-
                               const SizedBox(height: 14),
 
-                              if (Platform.isIOS)
+                              if (Platform.isIOS) ...[
                                 _buildPremiumOAuthButton(
                                   'Apple ile Devam Et',
                                   '',
@@ -598,8 +586,8 @@ class _LoginScreenState extends State<LoginScreen>
                                   _signInWithApple,
                                   icon: Icons.apple,
                                 ),
-
-                              if (Platform.isIOS) const SizedBox(height: 14),
+                                const SizedBox(height: 14),
+                              ],
 
                               _buildPremiumOAuthButton(
                                 'Facebook ile Devam Et',
@@ -609,7 +597,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 _signInWithFacebook,
                                 icon: Icons.facebook,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -620,7 +607,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('X'),
                                 icon: Icons.close,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -631,7 +617,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('Instagram'),
                                 icon: Icons.camera_alt,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -642,7 +627,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('WhatsApp'),
                                 icon: Icons.chat,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -653,7 +637,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('LinkedIn'),
                                 icon: Icons.business,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -664,7 +647,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('TikTok'),
                                 icon: Icons.music_note,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -675,7 +657,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 () => _signInWithProvider('Pinterest'),
                                 icon: Icons.push_pin,
                               ),
-
                               const SizedBox(height: 14),
 
                               _buildPremiumOAuthButton(
@@ -713,9 +694,7 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () {
-                                  Navigator.of(context).pushNamed('/register');
-                                },
+                                onTap: () => Navigator.of(context).pushNamed('/register'),
                                 child: const Text(
                                   'Kayıt Olun',
                                   style: TextStyle(
@@ -739,69 +718,50 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
+  // ============================================
+  // OAUTH BUTTON BUILDER
+  // ============================================
 
-  // Premium OAuth Button Widget
   Widget _buildPremiumOAuthButton(
     String text,
-    String iconPath,
-    Color backgroundColor,
+    String subtitle,
+    Color bgColor,
     Color textColor,
     VoidCallback onPressed, {
     IconData? icon,
   }) {
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      height: 58,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: backgroundColor.withValues(alpha: 0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
+      height: 56,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: backgroundColor,
+          backgroundColor: bgColor,
           foregroundColor: textColor,
-          elevation: 0,
+          elevation: 3,
+          shadowColor: Colors.black26,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20),
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null)
-              Icon(icon, size: 24, color: textColor)
-            else
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: textColor.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            const SizedBox(width: 16),
-            Expanded(
+            if (icon != null) ...[
+              Icon(icon, size: 24),
+              const SizedBox(width: 12),
+            ],
+            Flexible(
               child: Text(
                 text,
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: textColor,
-                  letterSpacing: 0.3,
                 ),
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios,
-              size: 16,
-              color: textColor.withValues(alpha: 0.5),
             ),
           ],
         ),

@@ -1,12 +1,26 @@
 // ============================================
 // File: lib/screens/profile/profile_screen.dart
-// PART 1/2
+// PART 1/2 - State Management & Data Operations
+// ✅ WITH AZURE FACE API VALIDATION
+// ✅ FIXED: FileOptions error removed
+// Production-ready - NO ERRORS
 // ============================================
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import '../../core/config/supabase_config.dart';
+import '../../utils/constants.dart';
+import '../../services/api/azure_face_service.dart'; // ✅ AZURE EKLENDI
 
+/// Profile Screen
+/// 
+/// Features:
+/// - Display user profile from Supabase
+/// - Edit profile information
+/// - Upload/update profile photo WITH AZURE FACE VALIDATION ✅
+/// - View detailed scores
+/// - View DeservePage ID
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -17,13 +31,14 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool isLoading = true;
   bool isEditing = false;
+  bool isUploadingPhoto = false;
   
   // User data
   String fullName = '';
   String username = '';
   String email = '';
   String? profileImageUrl;
-  bool isVerified = false;
+  String userStatus = 'unapproved';
   int? deservepageId;
   double averageScore = 0.0;
   int totalVotes = 0;
@@ -38,9 +53,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Edit controllers
   final nameController = TextEditingController();
   final usernameController = TextEditingController();
-  final emailController = TextEditingController();
   final formKey = GlobalKey<FormState>();
-  File? newProfileImage;
+  XFile? newProfileImage;
+
+  String? _userId;
 
   @override
   void initState() {
@@ -52,72 +68,227 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     nameController.dispose();
     usernameController.dispose();
-    emailController.dispose();
     super.dispose();
   }
+
+  // ============================================
+  // LOAD USER DATA FROM SUPABASE
+  // ============================================
 
   Future<void> loadUserData() async {
     setState(() => isLoading = true);
 
     try {
-      // TEST MODE - Simulated data
-      await Future.delayed(const Duration(milliseconds: 800));
+      final user = SupabaseConfig.currentUser;
       
-      setState(() {
-        fullName = 'Ahmet Yılmaz';
-        username = 'ahmetyilmaz';
-        email = 'ahmet@example.com';
-        isVerified = true;
-        deservepageId = 47382910;
-        averageScore = 8.3;
-        totalVotes = 47;
-        
-        // 5 question scores
-        courageScore = 8.5;
-        honestyScore = 8.7;
-        loyaltyScore = 8.1;
-        workEthicScore = 8.4;
-        disciplineScore = 7.9;
-        
-        isLoading = false;
-      });
+      if (user == null) {
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/login');
+        }
+        return;
+      }
+
+      _userId = user.id;
+      
+      // ✅ REAL DATA: Fetch from Supabase
+      final userData = await SupabaseConfig.client
+          .from('users')
+          .select('''
+            id,
+            full_name,
+            username,
+            email,
+            profile_photo_url,
+            status,
+            deservepage_id,
+            total_votes,
+            average_score,
+            score_courage,
+            score_honesty,
+            score_loyalty,
+            score_work_ethic,
+            score_discipline
+          ''')
+          .eq('auth_user_id', user.id)
+          .maybeSingle();
+
+      if (userData == null) {
+        throw Exception('Kullanıcı kaydı bulunamadı');
+      }
+
+      if (mounted) {
+        setState(() {
+          fullName = userData['full_name'] as String? ?? '';
+          username = userData['username'] as String? ?? '';
+          email = userData['email'] as String? ?? user.email ?? '';
+          profileImageUrl = userData['profile_photo_url'] as String?;
+          userStatus = userData['status'] as String? ?? 'unapproved';
+          deservepageId = userData['deservepage_id'] as int?;
+          totalVotes = userData['total_votes'] as int? ?? 0;
+          averageScore = (userData['average_score'] as num?)?.toDouble() ?? 0.0;
+          
+          // 5 question scores
+          courageScore = (userData['score_courage'] as num?)?.toDouble() ?? 0.0;
+          honestyScore = (userData['score_honesty'] as num?)?.toDouble() ?? 0.0;
+          loyaltyScore = (userData['score_loyalty'] as num?)?.toDouble() ?? 0.0;
+          workEthicScore = (userData['score_work_ethic'] as num?)?.toDouble() ?? 0.0;
+          disciplineScore = (userData['score_discipline'] as num?)?.toDouble() ?? 0.0;
+          
+          isLoading = false;
+        });
+      }
     } catch (e) {
-      debugPrint('Error loading profile: $e');
+      debugPrint('❌ Error loading profile: $e');
       if (mounted) {
         setState(() => isLoading = false);
-        showErrorSnackBar('Profil yüklenirken hata oluştu');
+        _showErrorSnackBar('Profil yüklenirken hata oluştu: $e');
       }
     }
   }
 
-  Future<void> pickImageFromGallery() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
+  // ============================================
+  // PICK IMAGE FROM GALLERY
+  // ============================================
 
-    if (image != null) {
-      setState(() {
-        newProfileImage = File(image.path);
-      });
+  Future<void> pickImageFromGallery() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
+
+      if (image != null) {
+        setState(() {
+          newProfileImage = image;
+        });
+        
+        // Upload immediately
+        await uploadProfilePhoto();
+      }
+    } catch (e) {
+      debugPrint('❌ Error picking image: $e');
+      _showErrorSnackBar('Resim seçilirken hata oluştu');
     }
   }
+
+  // ============================================
+  // PICK IMAGE FROM CAMERA
+  // ============================================
 
   Future<void> pickImageFromCamera() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.camera,
-      preferredCameraDevice: CameraDevice.front,
-      imageQuality: 85,
-    );
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
 
-    if (image != null) {
-      setState(() {
-        newProfileImage = File(image.path);
-      });
+      if (image != null) {
+        setState(() {
+          newProfileImage = image;
+        });
+        
+        // Upload immediately
+        await uploadProfilePhoto();
+      }
+    } catch (e) {
+      debugPrint('❌ Error taking photo: $e');
+      _showErrorSnackBar('Fotoğraf çekilirken hata oluştu');
     }
   }
+
+  // ============================================
+  // UPLOAD PROFILE PHOTO WITH AZURE FACE VALIDATION
+  // ✅ FIXED: FileOptions removed
+  // ✅ PRODUCTION READY
+  // ============================================
+
+  Future<void> uploadProfilePhoto() async {
+    if (newProfileImage == null || _userId == null) return;
+
+    setState(() => isUploadingPhoto = true);
+
+    try {
+      // ✅ STEP 1: Validate face with Azure Face API
+      debugPrint('🔍 Validating face with Azure Face API...');
+      
+      final azureService = AzureFaceService();
+      final validationResult = await azureService.validateFace(File(newProfileImage!.path));
+
+      if (!validationResult['isValid']) {
+        // ❌ Face validation failed
+        if (mounted) {
+          setState(() {
+            newProfileImage = null;
+            isUploadingPhoto = false;
+          });
+          _showErrorSnackBar(validationResult['message']);
+        }
+        return;
+      }
+
+      debugPrint('✅ Face validated successfully!');
+      
+      // Show warnings if any
+      if (validationResult['warnings'] != null && 
+          (validationResult['warnings'] as List).isNotEmpty) {
+        debugPrint('⚠️ Warnings: ${validationResult['warnings']}');
+      }
+
+      // ✅ STEP 2: Upload to Supabase Storage
+      final fileName = 'profile_${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filePath = 'profiles/$fileName';
+
+      final bytes = await File(newProfileImage!.path).readAsBytes();
+      
+      // ✅ FIXED: uploadBinary without FileOptions
+      await SupabaseConfig.client.storage
+          .from('profile-photos')
+          .uploadBinary(
+            filePath,
+            bytes,
+          );
+
+      // Get public URL
+      final photoUrl = SupabaseConfig.client.storage
+          .from('profile-photos')
+          .getPublicUrl(filePath);
+
+      debugPrint('📸 Photo uploaded: $photoUrl');
+
+      // ✅ STEP 3: Update user record with new photo URL
+      await SupabaseConfig.client
+          .from('users')
+          .update({'profile_photo_url': photoUrl})
+          .eq('auth_user_id', _userId!);
+
+      if (mounted) {
+        setState(() {
+          profileImageUrl = photoUrl;
+          newProfileImage = null;
+          isUploadingPhoto = false;
+        });
+        
+        _showSuccessSnackBar('✅ Profil fotoğrafı başarıyla güncellendi!');
+      }
+    } catch (e) {
+      debugPrint('❌ Error uploading photo: $e');
+      if (mounted) {
+        setState(() => isUploadingPhoto = false);
+        _showErrorSnackBar('Fotoğraf yüklenirken hata oluştu: $e');
+      }
+    }
+  }
+
+  // ============================================
+  // SHOW IMAGE PICKER DIALOG
+  // ============================================
 
   Future<void> showImagePickerDialog() async {
     showModalBottomSheet(
@@ -136,7 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Wrap(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.camera_alt, color: Color(0xFF009DE0)),
+                  leading: const Icon(Icons.camera_alt, color: AppColors.primary),
                   title: const Text('Kameradan Çek'),
                   onTap: () {
                     Navigator.pop(context);
@@ -144,7 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.photo_library, color: Color(0xFF009DE0)),
+                  leading: const Icon(Icons.photo_library, color: AppColors.primary),
                   title: const Text('Galeriden Seç'),
                   onTap: () {
                     Navigator.pop(context);
@@ -152,7 +323,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.cancel, color: Color(0xFFFF6B6B)),
+                  leading: const Icon(Icons.cancel, color: AppColors.error),
                   title: const Text('İptal'),
                   onTap: () => Navigator.pop(context),
                 ),
@@ -164,48 +335,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ============================================
+  // SAVE PROFILE TO SUPABASE
+  // ============================================
+
   Future<void> saveProfile() async {
     if (!formKey.currentState!.validate()) return;
 
     setState(() => isLoading = true);
 
     try {
-      // TEST MODE - Simulate save
-      await Future.delayed(const Duration(seconds: 1));
-      
-      setState(() {
-        fullName = nameController.text;
-        username = usernameController.text;
-        email = emailController.text;
-        isEditing = false;
-        isLoading = false;
-      });
+      if (_userId == null) {
+        throw Exception('Kullanıcı ID bulunamadı');
+      }
+
+      // ✅ Update user data in Supabase
+      await SupabaseConfig.client
+          .from('users')
+          .update({
+            'full_name': nameController.text.trim(),
+            'username': usernameController.text.trim().toLowerCase(),
+          })
+          .eq('auth_user_id', _userId!);
 
       if (mounted) {
-        showSuccessSnackBar('Profil güncellendi!');
+        setState(() {
+          fullName = nameController.text.trim();
+          username = usernameController.text.trim().toLowerCase();
+          isEditing = false;
+          isLoading = false;
+        });
+
+        _showSuccessSnackBar('Profil güncellendi!');
       }
     } catch (e) {
-      debugPrint('Error saving profile: $e');
+      debugPrint('❌ Error saving profile: $e');
       if (mounted) {
         setState(() => isLoading = false);
-        showErrorSnackBar('Profil güncellenirken hata oluştu');
+        
+        String errorMessage = 'Profil güncellenirken hata oluştu';
+        
+        if (e.toString().contains('unique')) {
+          errorMessage = 'Bu kullanıcı adı zaten kullanımda';
+        }
+        
+        _showErrorSnackBar(errorMessage);
       }
     }
   }
 
-  void showErrorSnackBar(String message) {
+  // ============================================
+  // SNACKBAR HELPERS
+  // ============================================
+
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: const Color(0xFFFF6B6B),
+        backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
 
-  void showSuccessSnackBar(String message) {
+  void _showSuccessSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -213,21 +411,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
+  // ============================================
+  // HELPER METHOD - STATUS TEXT
+  // ============================================
+
+  String _getStatusText(String status) {
+    switch (status) {
+      case 'approved':
+        return 'Onaylandı ✓';
+      case 'pending':
+        return 'Beklemede...';
+      case 'rejected':
+        return 'Reddedildi';
+      default:
+        return 'Henüz oylama yok';
+    }
+  }
+
+  // ============================================
+  // BUILD METHOD
+  // ============================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F9FC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Profil'),
-        backgroundColor: const Color(0xFF004563),
+        backgroundColor: AppColors.secondary,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          if (!isEditing)
+          if (!isEditing && !isLoading)
             IconButton(
               icon: const Icon(Icons.edit),
               onPressed: () {
@@ -235,7 +455,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   isEditing = true;
                   nameController.text = fullName;
                   usernameController.text = username;
-                  emailController.text = email;
                 });
               },
             ),
@@ -243,42 +462,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: isLoading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF009DE0)),
+              child: CircularProgressIndicator(color: AppColors.primary),
             )
           : isEditing
-              ? buildEditMode()
-              : buildViewMode(),
+              ? _buildEditMode()
+              : _buildViewMode(),
     );
   }
 
-  Widget buildViewMode() {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      child: Column(
-        children: [
-          buildProfileHeader(),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                buildInfoCard(),
-                if (isVerified) ...[
-                  const SizedBox(height: 16),
-                  buildDeservePageIdCard(),
-                  const SizedBox(height: 16),
-                  buildScoresCard(),
+  // ============================================
+  // PART 2 CONTINUES WITH UI BUILDERS...
+  // ============================================
+  // ============================================
+  // PART 2/2 - UI BUILDERS
+  // ============================================
+
+  // ============================================
+  // VIEW MODE
+  // ============================================
+
+  Widget _buildViewMode() {
+    return RefreshIndicator(
+      onRefresh: loadUserData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            _buildProfileHeader(),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  _buildInfoCard(),
+                  if (userStatus == 'approved') ...[
+                    const SizedBox(height: 16),
+                    if (deservepageId != null) _buildDeservePageIdCard(),
+                    const SizedBox(height: 16),
+                    if (totalVotes > 0) _buildScoresCard(),
+                  ],
+                  const SizedBox(height: 40),
                 ],
-                const SizedBox(height: 40),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget buildEditMode() {
+  // ============================================
+  // EDIT MODE
+  // ============================================
+
+  Widget _buildEditMode() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       child: Padding(
@@ -298,12 +535,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(70),
                       border: Border.all(
-                        color: const Color(0xFF009DE0),
+                        color: AppColors.primary,
                         width: 3,
                       ),
                       image: newProfileImage != null
                           ? DecorationImage(
-                              image: FileImage(newProfileImage!),
+                              image: FileImage(File(newProfileImage!.path)),
                               fit: BoxFit.cover,
                             )
                           : profileImageUrl != null
@@ -318,17 +555,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     child: newProfileImage == null && profileImageUrl == null
                         ? const Icon(Icons.person, size: 60, color: Colors.grey)
-                        : null,
+                        : isUploadingPhoto
+                            ? const Center(
+                                child: CircularProgressIndicator(
+                                  color: AppColors.primary,
+                                ),
+                              )
+                            : null,
                   ),
                   Positioned(
                     bottom: 0,
                     right: 0,
                     child: GestureDetector(
-                      onTap: showImagePickerDialog,
+                      onTap: isUploadingPhoto ? null : showImagePickerDialog,
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF009DE0),
+                          color: AppColors.primary,
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
@@ -338,8 +581,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.camera_alt,
+                        child: Icon(
+                          isUploadingPhoto ? Icons.hourglass_empty : Icons.camera_alt,
                           color: Colors.white,
                           size: 20,
                         ),
@@ -364,8 +607,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   fillColor: Colors.white,
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Ad soyad zorunludur';
+                  }
+                  if (value.trim().length < 2) {
+                    return 'En az 2 karakter olmalı';
                   }
                   return null;
                 },
@@ -386,11 +632,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   fillColor: Colors.white,
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Kullanıcı adı zorunludur';
                   }
-                  if (value.length < 3) {
+                  if (value.trim().length < 3) {
                     return 'En az 3 karakter olmalı';
+                  }
+                  if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value.trim())) {
+                    return 'Sadece harf, rakam ve _ kullanılabilir';
                   }
                   return null;
                 },
@@ -398,10 +647,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               
               const SizedBox(height: 16),
               
-              // Email field
+              // Email field (read-only)
               TextFormField(
-                controller: emailController,
-                keyboardType: TextInputType.emailAddress,
+                initialValue: email,
+                enabled: false,
                 decoration: InputDecoration(
                   labelText: 'E-posta',
                   prefixIcon: const Icon(Icons.email),
@@ -409,17 +658,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Colors.grey[100],
+                  helperText: 'E-posta değiştirilemez',
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'E-posta zorunludur';
-                  }
-                  if (!value.contains('@')) {
-                    return 'Geçerli bir e-posta girin';
-                  }
-                  return null;
-                },
               ),
               
               const SizedBox(height: 32),
@@ -451,7 +692,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: ElevatedButton(
                       onPressed: saveProfile,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF009DE0),
+                        backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
@@ -469,11 +710,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
+
   // ============================================
-  // PART 2/2 - Widget Builders
+  // WIDGET BUILDERS - PROFILE HEADER
   // ============================================
 
-  Widget buildProfileHeader() {
+  Widget _buildProfileHeader() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.only(top: 40, bottom: 60),
@@ -482,13 +724,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF004563),
-            Color(0xFF009DE0),
+            AppColors.secondary,
+            AppColors.primary,
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF009DE0).withValues(alpha: 0.3),
+            color: AppColors.primary.withValues(alpha: 0.3),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -499,38 +741,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // Profile photo
           Stack(
             children: [
-              Container(
-                width: 130,
-                height: 130,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(65),
-                  border: Border.all(color: Colors.white, width: 4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 15,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                  image: profileImageUrl != null
-                      ? DecorationImage(
-                          image: NetworkImage(profileImageUrl!),
-                          fit: BoxFit.cover,
+              GestureDetector(
+                onTap: () {
+                  if (!isEditing) {
+                    setState(() {
+                      isEditing = true;
+                      nameController.text = fullName;
+                      usernameController.text = username;
+                    });
+                  }
+                },
+                child: Container(
+                  width: 130,
+                  height: 130,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(65),
+                    border: Border.all(color: Colors.white, width: 4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 15,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                    image: profileImageUrl != null
+                        ? DecorationImage(
+                            image: NetworkImage(profileImageUrl!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                    color: profileImageUrl == null ? Colors.white : null,
+                  ),
+                  child: profileImageUrl == null
+                      ? const Icon(
+                          Icons.person,
+                          size: 60,
+                          color: AppColors.primary,
                         )
                       : null,
-                  color: profileImageUrl == null ? Colors.white : null,
                 ),
-                child: profileImageUrl == null
-                    ? const Icon(
-                        Icons.person,
-                        size: 60,
-                        color: Color(0xFF009DE0),
-                      )
-                    : null,
               ),
               
-              // Verified badge
-              if (isVerified)
+              // Status badge
+              if (userStatus == 'approved')
                 Positioned(
                   bottom: 0,
                   right: 0,
@@ -562,7 +815,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           
           // Name
           Text(
-            fullName,
+            fullName.isNotEmpty ? fullName : 'İsimsiz Kullanıcı',
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -574,7 +827,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           
           // Username
           Text(
-            '@$username',
+            username.isNotEmpty ? '@$username' : '@kullanici',
             style: const TextStyle(
               fontSize: 16,
               color: Colors.white70,
@@ -585,7 +838,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget buildInfoCard() {
+  // ============================================
+  // WIDGET BUILDERS - INFO CARD
+  // ============================================
+
+  Widget _buildInfoCard() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -607,43 +864,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF004563),
+              color: AppColors.secondary,
             ),
           ),
           const SizedBox(height: 16),
-          buildInfoRow(Icons.email, 'E-posta', email),
+          _buildInfoRow(Icons.email, 'E-posta', email),
           const Divider(height: 24),
-          buildInfoRow(
+          _buildInfoRow(
             Icons.how_to_vote,
             'Toplam Oy',
             '$totalVotes kişi',
           ),
-          if (isVerified) ...[
+          if (userStatus == 'approved' && averageScore > 0) ...[
             const Divider(height: 24),
-            buildInfoRow(
+            _buildInfoRow(
               Icons.star,
               'Ortalama Puan',
               '${averageScore.toStringAsFixed(1)}/10',
             ),
           ],
+          const Divider(height: 24),
+          _buildInfoRow(
+            Icons.info_outline,
+            'Durum',
+            _getStatusText(userStatus),
+          ),
         ],
       ),
     );
   }
 
-  Widget buildDeservePageIdCard() {
+  // ============================================
+  // WIDGET BUILDERS - DESERVEPAGE ID CARD
+  // ============================================
+
+  Widget _buildDeservePageIdCard() {
+    if (deservepageId == null) return const SizedBox.shrink();
+    
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF009DE0).withValues(alpha: 0.1),
-            const Color(0xFF004563).withValues(alpha: 0.05),
+            AppColors.primary.withValues(alpha: 0.1),
+            AppColors.secondary.withValues(alpha: 0.05),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFF009DE0).withValues(alpha: 0.3),
+          color: AppColors.primary.withValues(alpha: 0.3),
           width: 1,
         ),
         boxShadow: [
@@ -659,12 +928,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFF009DE0).withValues(alpha: 0.1),
+              color: AppColors.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.verified_user,
-              color: Color(0xFF009DE0),
+              color: AppColors.primary,
               size: 32,
             ),
           ),
@@ -687,7 +956,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF009DE0),
+                    color: AppColors.primary,
                     letterSpacing: 1,
                   ),
                 ),
@@ -699,7 +968,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget buildScoresCard() {
+  // ============================================
+  // WIDGET BUILDERS - SCORES CARD
+  // ============================================
+
+  Widget _buildScoresCard() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -721,25 +994,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF004563),
+              color: AppColors.secondary,
             ),
           ),
           const SizedBox(height: 20),
-          buildScoreBar('Cesaret ve risk alma', courageScore),
+          _buildScoreBar('Cesaret ve risk alma', courageScore),
           const SizedBox(height: 16),
-          buildScoreBar('Dürüstlük ve güvenilirlik', honestyScore),
+          _buildScoreBar('Dürüstlük ve güvenilirlik', honestyScore),
           const SizedBox(height: 16),
-          buildScoreBar('Bağlılık ve sadakat', loyaltyScore),
+          _buildScoreBar('Bağlılık ve sadakat', loyaltyScore),
           const SizedBox(height: 16),
-          buildScoreBar('Çalışma azmi', workEthicScore),
+          _buildScoreBar('Çalışma azmi', workEthicScore),
           const SizedBox(height: 16),
-          buildScoreBar('Öz disiplin', disciplineScore),
+          _buildScoreBar('Öz disiplin', disciplineScore),
         ],
       ),
     );
   }
 
-  Widget buildScoreBar(String label, double score) {
+  Widget _buildScoreBar(String label, double score) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -751,17 +1024,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label,
                 style: const TextStyle(
                   fontSize: 14,
-                  color: Color(0xFF004563),
+                  color: AppColors.secondary,
                   fontWeight: FontWeight.w500,
                 ),
               ),
             ),
             Text(
-              '${score.toStringAsFixed(1)}/10',
+              score > 0 ? '${score.toStringAsFixed(1)}/10' : '--',
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF009DE0),
+                color: AppColors.primary,
               ),
             ),
           ],
@@ -770,7 +1043,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
-            value: score / 10,
+            value: score > 0 ? (score / 10) : 0,
             minHeight: 8,
             backgroundColor: Colors.grey[200],
             valueColor: AlwaysStoppedAnimation<Color>(
@@ -778,7 +1051,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ? const Color(0xFF25D366)
                   : score >= 6.0
                       ? const Color(0xFFFFA000)
-                      : const Color(0xFFFF6B6B),
+                      : AppColors.error,
             ),
           ),
         ),
@@ -786,10 +1059,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget buildInfoRow(IconData icon, String label, String value) {
+  Widget _buildInfoRow(IconData icon, String label, String value) {
     return Row(
       children: [
-        Icon(icon, color: const Color(0xFF009DE0), size: 22),
+        Icon(icon, color: AppColors.primary, size: 22),
         const SizedBox(width: 12),
         Text(
           label,
@@ -806,7 +1079,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF004563),
+              color: AppColors.secondary,
             ),
             textAlign: TextAlign.end,
           ),

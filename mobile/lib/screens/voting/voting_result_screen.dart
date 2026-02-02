@@ -1,7 +1,7 @@
 // ============================================
 // File: lib/screens/voting/voting_result_screen.dart
-// Voting Result Screen - Shows final result after 72-hour period
-// FIXED: Navigation, Error Handling, AppBar Leading
+// PART 1/2 - Voting Result Screen
+// FINAL FIXED: All nullable issues resolved
 // ============================================
 
 import 'package:flutter/material.dart';
@@ -45,14 +45,12 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
   /// Load voting result from database
   Future<void> _loadVotingResult() async {
     try {
-      // ✅ FIX: Better error handling with maybeSingle
       final response = await SupabaseConfig.client
           .from('voting_sessions')
           .select()
           .eq('id', widget.votingSessionId)
           .maybeSingle();
 
-      // ✅ FIX: Handle null response (voting not found)
       if (response == null) {
         setState(() {
           _errorMessage = 'Bu oylama bulunamadı veya silinmiş olabilir.';
@@ -66,7 +64,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
         _isLoading = false;
       });
 
-      // Trigger confetti if approved
       if (_session!.isApproved) {
         _confettiController.play();
       }
@@ -94,7 +91,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
       }).eq('id', userId);
     } catch (e) {
       debugPrint('⚠️ Failed to update user status: $e');
-      // Silent fail - don't block user experience
     }
   }
 
@@ -105,7 +101,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
 
   /// Share success on social media
   void _shareSuccess() {
-    // TODO: Implement share functionality
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Paylaşım özelliği yakında eklenecek!'),
@@ -139,7 +134,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
       return _buildErrorScreen();
     }
 
-    // Check if approved or failed
     if (_session!.isApproved) {
       return _buildSuccessScreen();
     } else {
@@ -179,15 +173,12 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
       appBar: AppBar(
         title: const Text('Hata'),
         backgroundColor: const Color(0xFF004563),
-        // ✅ FIX: Properly working back button
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            // Try to pop first
             if (Navigator.of(context).canPop()) {
               Navigator.of(context).pop();
             } else {
-              // If can't pop, go to home
               Navigator.of(context).pushReplacementNamed('/home');
             }
           },
@@ -236,14 +227,12 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
   /// Success screen (Approved >= 50.01%)
   Widget _buildSuccessScreen() {
     final deservepageId = _generateDeservepageId();
-    _updateUserStatus(); // Update user status in background
+    _updateUserStatus();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F9FC),
-      // ✅ FIX: No back button on success (prevent going back)
       body: Stack(
         children: [
-          // Confetti animation
           Align(
             alignment: Alignment.topCenter,
             child: ConfettiWidget(
@@ -260,14 +249,12 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
               ],
             ),
           ),
-          // Content
           SafeArea(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24.0),
               child: Column(
                 children: [
                   const SizedBox(height: 40),
-                  // Success icon
                   Container(
                     width: 120,
                     height: 120,
@@ -276,7 +263,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF4CAF50).withOpacity(0.3),
+                          color: const Color(0xFF4CAF50).withValues(alpha: 0.3),
                           blurRadius: 30,
                           spreadRadius: 5,
                         ),
@@ -289,7 +276,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Success title
                   const Text(
                     '🎉 Tebrikler!',
                     style: TextStyle(
@@ -308,7 +294,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  // DeservePage ID card
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
@@ -316,7 +301,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 20,
                           offset: const Offset(0, 5),
                         ),
@@ -345,7 +330,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                     ),
                   ),
                   const SizedBox(height: 30),
-                  // Statistics card
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -353,7 +337,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 20,
                           offset: const Offset(0, 5),
                         ),
@@ -369,20 +353,20 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                         const Divider(height: 24),
                         _buildStatRow(
                           '⭐ Ortalama Puan',
-                          '${_session!.averageScore?.toStringAsFixed(1) ?? '0.0'}/10',
+                          '${(_session!.averageScore ?? 0.0).toStringAsFixed(1)}/10',
                           const Color(0xFF009DE0),
                         ),
                         const Divider(height: 24),
                         _buildStatRow(
                           '🗳️ Toplam Oy',
-                          '${_session!.totalVotes ?? 0} kişi',
+                          // ✅ FIXED: Line 364 - Removed ?? 0 (dead null-aware)
+                          '${_session!.totalVotes} kişi',
                           const Color(0xFF004563),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 30),
-                  // Detailed scores
                   if (_session!.detailedScores != null)
                     Container(
                       padding: const EdgeInsets.all(20),
@@ -391,7 +375,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
+                            color: Colors.black.withValues(alpha: 0.05),
                             blurRadius: 20,
                             offset: const Offset(0, 5),
                           ),
@@ -418,7 +402,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                       ),
                     ),
                   const SizedBox(height: 30),
-                  // Share button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -436,7 +419,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                     ),
                   ),
                   const SizedBox(height: 30),
-                  // Premium upgrade prompt
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -527,7 +509,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
       ),
     );
   }
-
   /// Failure screen (< 50.01%)
   Widget _buildFailureScreen() {
     final nextRetryDate = DateTime.now().add(const Duration(days: 30));
@@ -537,7 +518,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
       appBar: AppBar(
         title: const Text('Oylama Sonucu'),
         backgroundColor: const Color(0xFF004563),
-        // ✅ FIX: Working back button
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
@@ -555,7 +535,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
           child: Column(
             children: [
               const SizedBox(height: 40),
-              // Failure icon
               Container(
                 width: 120,
                 height: 120,
@@ -564,7 +543,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFFF6B6B).withOpacity(0.3),
+                      color: const Color(0xFFFF6B6B).withValues(alpha: 0.3),
                       blurRadius: 30,
                       spreadRadius: 5,
                     ),
@@ -577,7 +556,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              // Title
               const Text(
                 'Yeterli Onay Alınamadı',
                 style: TextStyle(
@@ -588,7 +566,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
-              // Statistics card
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -596,7 +573,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 20,
                       offset: const Offset(0, 5),
                     ),
@@ -612,20 +589,20 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                     const Divider(height: 24),
                     _buildStatRow(
                       '⭐ Ortalama Puan',
-                      '${_session!.averageScore?.toStringAsFixed(1) ?? '0.0'}/10',
+                      '${(_session!.averageScore ?? 0.0).toStringAsFixed(1)}/10',
                       const Color(0xFF009DE0),
                     ),
                     const Divider(height: 24),
                     _buildStatRow(
                       '🗳️ Toplam Oy',
-                      '${_session!.totalVotes ?? 0} kişi',
+                      // ✅ FIXED: Line 601 - Removed ?? 0 (dead null-aware)
+                      '${_session!.totalVotes} kişi',
                       const Color(0xFF004563),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 30),
-              // Feedback card
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -669,7 +646,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                 ),
               ),
               const SizedBox(height: 30),
-              // Retry info card
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -677,7 +653,7 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 20,
                       offset: const Offset(0, 5),
                     ),
@@ -713,7 +689,6 @@ class _VotingResultScreenState extends State<VotingResultScreen> {
                 ),
               ),
               const SizedBox(height: 30),
-              // Back to home button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(

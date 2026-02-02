@@ -1,6 +1,6 @@
 // ============================================
 // File: lib/main.dart
-// FIXED: Route parameters for voting screens
+// FIXED: All routing and initialization issues
 // ============================================
 
 import 'package:flutter/material.dart';
@@ -28,11 +28,16 @@ import 'screens/voting/voting_result_screen.dart';
 // Utils
 import 'utils/constants.dart';
 
+// Firebase options
+import 'firebase_options.dart';
+
 // ============================================
 // Firebase Background Message Handler
 // ============================================
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   debugPrint('📩 Background message: ${message.messageId}');
 }
 
@@ -47,8 +52,10 @@ void main() async {
     await dotenv.load(fileName: '.env');
     debugPrint('✅ .env loaded');
 
-    // 2. Initialize Firebase
-    await Firebase.initializeApp();
+    // 2. Initialize Firebase with platform options
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     debugPrint('✅ Firebase initialized');
 
@@ -113,7 +120,7 @@ class MyApp extends StatelessWidget {
       title: 'YANSIMAM v1',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      initialRoute: AppRoutes.splash,
+      initialRoute: AppRoutes.splash, // ✅ Splash screen'den başlar
       routes: _buildRoutes(),
       onGenerateRoute: _onGenerateRoute,
     );

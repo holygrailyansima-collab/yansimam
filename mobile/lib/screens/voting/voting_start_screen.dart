@@ -1,6 +1,7 @@
 // ============================================
 // File: lib/screens/voting/voting_start_screen.dart
-// Complete voting flow with VotingService integration
+// FIXED: Centered capture section + no auto-notification
+// PART 1/2
 // ============================================
 
 import 'dart:io';
@@ -11,6 +12,15 @@ import '../../services/api/azure_face_service.dart';
 import '../../services/voting_service.dart';
 import 'voting_share_screen.dart';
 
+/// Voting Start Screen
+/// 
+/// Features:
+/// - Photo capture/upload
+/// - Azure Face API validation
+/// - Terms & Conditions acceptance
+/// - Start 72-hour voting period
+/// 
+/// FIXED: Centered capture button + no auto-notification
 class VotingStartScreen extends StatefulWidget {
   const VotingStartScreen({super.key});
 
@@ -20,6 +30,11 @@ class VotingStartScreen extends StatefulWidget {
 
 class _VotingStartScreenState extends State<VotingStartScreen>
     with SingleTickerProviderStateMixin {
+  
+  // ============================================
+  // STATE VARIABLES
+  // ============================================
+  
   bool isLoading = false;
   bool hasAcceptedTerms = false;
   bool isProcessing = false;
@@ -30,6 +45,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
 
   File? _capturedImage;
   bool _isPhotoValidated = false;
+
+  // ============================================
+  // LIFECYCLE METHODS
+  // ============================================
 
   @override
   void initState() {
@@ -43,7 +62,9 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       curve: Curves.easeIn,
     );
     _animationController.forward();
-    _checkExistingSession();
+    
+    // ✅ REMOVED: _checkExistingSession() - NO AUTO NOTIFICATION
+    // Session check is now ONLY in _startVotingProcess()
   }
 
   @override
@@ -53,88 +74,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
   }
 
   // ============================================
-  // CHECK EXISTING ACTIVE SESSION
-  // ============================================
-
-  Future<void> _checkExistingSession() async {
-    try {
-      final user = SupabaseConfig.currentUser;
-      if (user == null) return;
-
-      // ✅ FIX: Get user_id from public.users table
-      final userData = await SupabaseConfig.client
-          .from('users')
-          .select('id')
-          .eq('auth_user_id', user.id)
-          .maybeSingle();
-
-      if (userData == null) {
-        debugPrint('⚠️ User not found in public.users table');
-        return;
-      }
-
-      final userId = userData['id'] as String;
-
-      final existingSession =
-          await VotingService.getUserActiveSession(userId);
-
-      if (existingSession != null && mounted) {
-        // User already has an active session
-        final sessionId = existingSession['id'].toString();
-        final uniqueLink = existingSession['unique_link'].toString();
-
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: const Text(
-              'Aktif Oylama Mevcut',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            content: const Text(
-              'Zaten devam eden bir oylama süreciniz var. Mevcut oylamanızı görüntülemek ister misiniz?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext); // Close dialog
-                  Navigator.pop(context); // Close voting start screen
-                },
-                child: const Text('İptal'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext); // Close dialog
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => VotingShareScreen(
-                        votingLink: 'yansimam.vercel.app/vote/$uniqueLink',
-                        sessionId: sessionId,
-                      ),
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF009DE0),
-                ),
-                child: const Text('Görüntüle'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('⚠️ Error checking existing session: $e');
-      // Continue silently - user can create new session if this fails
-    }
-  }
-
-  // ============================================
-  // TAKE PICTURE WITH CAMERA
+  // PHOTO CAPTURE METHODS
   // ============================================
 
   Future<void> _takePicture() async {
@@ -166,7 +106,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
   }
 
   // ============================================
-  // VALIDATE PHOTO WITH AZURE FACE API
+  // AZURE FACE API VALIDATION
   // ============================================
 
   Future<void> _validatePhoto() async {
@@ -213,10 +153,11 @@ class _VotingStartScreenState extends State<VotingStartScreen>
   }
 
   // ============================================
-  // START VOTING PROCESS (WITH VOTING SERVICE)
+  // START VOTING PROCESS (WITH SESSION CHECK)
   // ============================================
 
   Future<void> _startVotingProcess() async {
+    // Validation checks
     if (!hasAcceptedTerms) {
       _showErrorSnackBar('Lütfen kuralları kabul edin');
       return;
@@ -240,7 +181,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
         throw Exception('Kullanıcı girişi bulunamadı');
       }
 
-      // ⚡ FIX: Get user_id from public.users table
+      // Get user_id from public.users table
       setState(() => processingStep = 'Kullanıcı bilgileri alınıyor...');
       
       final userData = await SupabaseConfig.client
@@ -256,13 +197,80 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       final userId = userData['id'] as String;
       debugPrint('✅ Found user_id: $userId');
 
-      // Use VotingService to create session
+      // ✅ CHECK EXISTING SESSION HERE (not in initState)
+      setState(() => processingStep = 'Mevcut oylama kontrol ediliyor...');
+
+      final existingSession = await VotingService.getUserActiveSession(userId);
+
+      if (existingSession != null) {
+        // User already has an active session
+        setState(() {
+          isLoading = false;
+          processingStep = null;
+        });
+
+        if (!mounted) return;
+
+        final sessionId = existingSession['id'].toString();
+        final uniqueLink = existingSession['unique_link'].toString();
+
+        // Show dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              'Aktif Oylama Mevcut',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: const Text(
+              'Zaten devam eden bir oylama süreciniz var. Mevcut oylamanızı görüntülemek ister misiniz?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext); // Close dialog
+                  Navigator.pop(context); // Close voting start screen
+                },
+                child: const Text('İptal'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext); // Close dialog
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => VotingShareScreen(
+                        votingLink: 'yansimam.vercel.app/vote/$uniqueLink',
+                        sessionId: sessionId,
+                      ),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF009DE0),
+                ),
+                child: const Text('Görüntüle'),
+              ),
+            ],
+          ),
+        );
+
+        return;
+      }
+
+      // No existing session, create new one
       setState(() => processingStep = 'Fotoğraf yükleniyor...');
       
       final sessionData = await VotingService.createVotingSession(
         photoFile: _capturedImage!,
-        userId: userId, // ✅ Now using public.users.id instead of auth.users.id
+        userId: userId,
       );
+
+      debugPrint('✅ Session created: ${sessionData['id']}');
 
       if (mounted) {
         _showSuccessSnackBar('✅ Onay süreci başlatıldı!');
@@ -284,7 +292,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       }
     } catch (e) {
       debugPrint('❌ Error starting voting process: $e');
-      if (mounted) {
+      if (mounted && !navigationCompleted) {
         setState(() {
           isLoading = false;
           processingStep = null;
@@ -306,13 +314,6 @@ class _VotingStartScreenState extends State<VotingStartScreen>
         }
         
         _showErrorSnackBar(errorMessage);
-      }
-    } finally {
-      if (mounted && !navigationCompleted) {
-        setState(() {
-          isLoading = false;
-          processingStep = null;
-        });
       }
     }
   }
@@ -416,7 +417,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
   }
 
   // ============================================
-  // UI COMPONENTS
+  // UI COMPONENTS - HERO SECTION
   // ============================================
 
   Widget _buildHeroSection() {
@@ -472,6 +473,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
     );
   }
 
+  // ============================================
+  // UI COMPONENTS - CAPTURE SECTION (FIXED: CENTERED)
+  // ============================================
+
   Widget _buildCaptureSection() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -490,6 +495,9 @@ class _VotingStartScreenState extends State<VotingStartScreen>
         ],
       ),
       child: Column(
+        // ✅ FIX: Tüm column içeriği ortalandı
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(
             Icons.camera_alt,
@@ -504,24 +512,28 @@ class _VotingStartScreenState extends State<VotingStartScreen>
               fontWeight: FontWeight.bold,
               color: Color(0xFF004563),
             ),
+            textAlign: TextAlign.center, // ✅ Text ortalandı
           ),
           const SizedBox(height: 8),
           const Text(
             'Oylama sürecini başlatmak için fotoğrafınızı çekin',
             style: TextStyle(fontSize: 14, color: Colors.grey),
-            textAlign: TextAlign.center,
+            textAlign: TextAlign.center, // ✅ Text ortalandı
           ),
           const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: _takePicture,
-            icon: const Icon(Icons.camera_alt),
-            label: const Text('Kamerayı Aç'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF009DE0),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          // ✅ FIX: Buton tam genişlik yerine content-based
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: _takePicture,
+              icon: const Icon(Icons.camera_alt),
+              label: const Text('Kamerayı Aç'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF009DE0),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
@@ -529,6 +541,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       ),
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - PHOTO PREVIEW
+  // ============================================
 
   Widget _buildPhotoPreview() {
     return Container(
@@ -586,18 +602,17 @@ class _VotingStartScreenState extends State<VotingStartScreen>
             )
           else
             Row(
+              mainAxisAlignment: MainAxisAlignment.center, // ✅ Centered
               children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _capturedImage = null;
-                        _isPhotoValidated = false;
-                      });
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Yeniden Çek'),
-                  ),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _capturedImage = null;
+                      _isPhotoValidated = false;
+                    });
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Yeniden Çek'),
                 ),
               ],
             ),
@@ -605,6 +620,9 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       ),
     );
   }
+  // ============================================
+  // UI COMPONENTS - INFO CARD
+  // ============================================
 
   Widget _buildInfoCard() {
     return Container(
@@ -623,11 +641,11 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.info_outline, color: Color(0xFF009DE0), size: 24),
-              const SizedBox(width: 12),
-              const Text(
+              Icon(Icons.info_outline, color: Color(0xFF009DE0), size: 24),
+              SizedBox(width: 12),
+              Text(
                 'Süreç Hakkında',
                 style: TextStyle(
                   fontSize: 18,
@@ -672,6 +690,11 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       ],
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - PROCESS STEPS
+  // ============================================
+
   Widget _buildProcessSteps() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -689,11 +712,11 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.list_alt, color: Color(0xFF009DE0), size: 24),
-              const SizedBox(width: 12),
-              const Text(
+              Icon(Icons.list_alt, color: Color(0xFF009DE0), size: 24),
+              SizedBox(width: 12),
+              Text(
                 'Nasıl Çalışır?',
                 style: TextStyle(
                   fontSize: 18,
@@ -769,6 +792,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
     );
   }
 
+  // ============================================
+  // UI COMPONENTS - RULES SECTION
+  // ============================================
+
   Widget _buildRulesSection() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -782,11 +809,11 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.warning_amber, color: Color(0xFFFFA000), size: 24),
-              const SizedBox(width: 12),
-              const Text(
+              Icon(Icons.warning_amber, color: Color(0xFFFFA000), size: 24),
+              SizedBox(width: 12),
+              Text(
                 'Önemli Kurallar',
                 style: TextStyle(
                   fontSize: 18,
@@ -832,6 +859,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       ],
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - TERMS CHECKBOX
+  // ============================================
 
   Widget _buildTermsCheckbox() {
     return Container(
@@ -886,6 +917,10 @@ class _VotingStartScreenState extends State<VotingStartScreen>
       ),
     );
   }
+
+  // ============================================
+  // UI COMPONENTS - START BUTTON
+  // ============================================
 
   Widget _buildStartButton() {
     final canStart =
@@ -948,6 +983,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
               ),
             ),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center, // ✅ Centered
               children: [
                 const Icon(Icons.info_outline, color: Colors.orange, size: 20),
                 const SizedBox(width: 12),
@@ -962,6 +998,7 @@ class _VotingStartScreenState extends State<VotingStartScreen>
                       fontSize: 13,
                       color: Colors.orange,
                     ),
+                    textAlign: TextAlign.center, // ✅ Centered
                   ),
                 ),
               ],

@@ -1,11 +1,28 @@
 // ============================================
 // File: lib/screens/splash/splash_screen.dart
+// FIXED: Smart routing based on user status
+// Session var → User status kontrolü → Doğru yönlendirme
 // ============================================
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../../core/config/supabase_config.dart';
 
+/// Splash Screen
+/// 
+/// Features:
+/// - Firebase initialization check
+/// - Supabase connection check
+/// - Session validation
+/// - User verification
+/// - Smart routing based on user status:
+///   * No session → LOGIN
+///   * Session + unapproved → LOGIN (user needs to complete flow)
+///   * Session + pending → HOME (voting in progress)
+///   * Session + approved → HOME
+///   * Session + rejected → HOME (can retry after 30 days)
+/// 
+/// FIXED: User status kontrolü eklendi
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -15,6 +32,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
+  
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
@@ -28,6 +46,10 @@ class _SplashScreenState extends State<SplashScreen>
     _setupAnimations();
     _initializeApp();
   }
+
+  // ============================================
+  // ANIMATIONS SETUP
+  // ============================================
 
   void _setupAnimations() {
     _animationController = AnimationController(
@@ -47,10 +69,14 @@ class _SplashScreenState extends State<SplashScreen>
     _animationController.forward();
   }
 
+  // ============================================
+  // APP INITIALIZATION
+  // ============================================
+
   Future<void> _initializeApp() async {
     try {
-      // Firebase check
-      setState(() => _statusMessage = 'Firebase bağlanıyor...');
+      // 1. Firebase Check
+      setState(() => _statusMessage = 'Firebase kontrol ediliyor...');
       await Future.delayed(const Duration(milliseconds: 500));
 
       final firebaseInitialized = Firebase.apps.isNotEmpty;
@@ -59,63 +85,97 @@ class _SplashScreenState extends State<SplashScreen>
       }
       debugPrint('✅ Firebase başlatıldı');
 
-      // Supabase connection check
+      // 2. Supabase Connection Check
       setState(() => _statusMessage = 'Supabase bağlanıyor...');
       await Future.delayed(const Duration(milliseconds: 500));
 
       final supabase = SupabaseConfig.client;
 
-      // Simple query to test connection
+      // Test connection with a simple query
       try {
-        await supabase.from('users').select('count').count();
+        await supabase.from('users').select('count').limit(1);
         debugPrint('✅ Supabase bağlantısı başarılı');
       } catch (e) {
-        debugPrint('⚠️ Supabase users tablosu bulunamadı (normal): $e');
-        // Continue even if users table doesn't exist
+        debugPrint('⚠️ Supabase bağlantı testi hatası (devam ediliyor): $e');
+        // Continue even if test fails - table might not exist yet
       }
 
-      // ✅ TEST MODE: Session check temporarily disabled
-      setState(() => _statusMessage = 'Test modu aktif...');
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      debugPrint(
-          '🧪 TEST MODU: Session kontrolü atlanıyor, direkt login\'e gidiliyor...');
-
-      if (!mounted) return;
-
-      setState(() => _statusMessage = 'Başarılı!');
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      if (!mounted) return;
-
-      // ✅ TEST MODE: Go directly to login (no session check)
-      debugPrint('ℹ️ Login sayfasına yönlendiriliyor...');
-      Navigator.of(context).pushReplacementNamed('/login');
-
-      /* ========================================
-         REAL SESSION CHECK (CURRENTLY DISABLED)
-         Enable this code in production:
-         1. Remove test mode code above (lines 75-95)
-         2. Uncomment code below
-         ======================================== */
-
-      /*
-      // Session check
+      // 3. Session Check
       setState(() => _statusMessage = 'Oturum kontrol ediliyor...');
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
       final session = SupabaseConfig.auth.currentSession;
-      final user = SupabaseConfig.currentUser;
-      
-      debugPrint('🔍 Session Check:');
+      final user = SupabaseConfig.auth.currentUser;
+
+      debugPrint('🔍 Session Validation:');
+      debugPrint('   Session exists: ${session != null}');
+      debugPrint('   User exists: ${user != null}');
       debugPrint('   User ID: ${user?.id}');
       debugPrint('   Email: ${user?.email}');
-      debugPrint('   Session exists: ${session != null}');
       
-      if (session?.accessToken != null) {
-        debugPrint('   Access Token: ${session!.accessToken.substring(0, 20)}...');
+      if (session != null) {
+        debugPrint('   Session expires at: ${session.expiresAt}');
+        debugPrint('   Access token length: ${session.accessToken.length}');
+        
+        // Check if session is expired
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final expiresAt = session.expiresAt;
+        
+        if (expiresAt != null && expiresAt <= now) {
+          debugPrint('⚠️ Session expired, clearing...');
+          await SupabaseConfig.auth.signOut();
+          if (!mounted) return;
+          setState(() => _statusMessage = 'Oturum süresi doldu, giriş yapın');
+          await Future.delayed(const Duration(seconds: 1));
+          if (!mounted) return;
+          Navigator.of(context).pushReplacementNamed('/login');
+          return;
+        }
       }
+
+      // 4. User Verification (if session exists)
+      String? userStatus;
       
+      if (session != null && user != null) {
+        setState(() => _statusMessage = 'Kullanıcı doğrulanıyor...');
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        try {
+          // Verify user exists in database
+          final userData = await supabase
+              .from('users')
+              .select('id, email, status, full_name, username')
+              .eq('auth_user_id', user.id)
+              .maybeSingle();
+
+          debugPrint('   Database user: ${userData != null ? "Found" : "Not found"}');
+          
+          if (userData != null) {
+            userStatus = userData['status'] as String?;
+            debugPrint('   User status: $userStatus');
+            debugPrint('   User email: ${userData['email']}');
+            debugPrint('   Full name: ${userData['full_name']}');
+            debugPrint('   Username: ${userData['username']}');
+          }
+
+          // If user not found in database, clear session
+          if (userData == null) {
+            debugPrint('⚠️ User not found in database, clearing session...');
+            await SupabaseConfig.auth.signOut();
+            if (!mounted) return;
+            Navigator.of(context).pushReplacementNamed('/login');
+            return;
+          }
+        } catch (e) {
+          debugPrint('⚠️ User verification error: $e');
+          // If verification fails, clear session and go to login
+          await SupabaseConfig.auth.signOut();
+          if (!mounted) return;
+          Navigator.of(context).pushReplacementNamed('/login');
+          return;
+        }
+      }
+
       if (!mounted) return;
 
       setState(() => _statusMessage = 'Başarılı!');
@@ -123,27 +183,72 @@ class _SplashScreenState extends State<SplashScreen>
 
       if (!mounted) return;
 
-      // Navigation
-      if (session != null && user != null) {
-        debugPrint('✅ Oturum açık, ana sayfaya yönlendiriliyor...');
-        Navigator.of(context).pushReplacementNamed('/home');
-      } else {
-        debugPrint('ℹ️ Oturum yok, giriş sayfasına yönlendiriliyor...');
+      // ============================================
+      // 5. SMART NAVIGATION BASED ON USER STATUS
+      // ============================================
+      
+      if (session == null || user == null) {
+        // No session → Go to LOGIN
+        debugPrint('ℹ️ No valid session, navigating to LOGIN');
         Navigator.of(context).pushReplacementNamed('/login');
+        return;
       }
-      */
-    } catch (e) {
-      debugPrint('❌ Splash Error: $e');
-      setState(() {
-        _hasError = true;
-        _statusMessage = 'Hata: ${e.toString()}';
-      });
 
-      await Future.delayed(const Duration(seconds: 3));
+      // Session exists, check user status
+      debugPrint('🎯 Smart routing based on status: $userStatus');
+      
+      switch (userStatus) {
+        case 'unapproved':
+          // User registered but hasn't completed voting flow
+          // Send to LOGIN so they can start voting
+          debugPrint('➡️ Status: unapproved → Navigating to LOGIN');
+          Navigator.of(context).pushReplacementNamed('/login');
+          break;
+          
+        case 'pending':
+          // Voting in progress → Go to HOME
+          debugPrint('➡️ Status: pending → Navigating to HOME');
+          Navigator.of(context).pushReplacementNamed('/home');
+          break;
+          
+        case 'approved':
+          // Approved user → Go to HOME
+          debugPrint('➡️ Status: approved → Navigating to HOME');
+          Navigator.of(context).pushReplacementNamed('/home');
+          break;
+          
+        case 'rejected':
+          // Rejected but can retry → Go to HOME
+          debugPrint('➡️ Status: rejected → Navigating to HOME');
+          Navigator.of(context).pushReplacementNamed('/home');
+          break;
+          
+        default:
+          // Unknown status → Go to LOGIN for safety
+          debugPrint('⚠️ Unknown status: $userStatus → Navigating to LOGIN');
+          Navigator.of(context).pushReplacementNamed('/login');
+      }
+      
+    } catch (e) {
+      debugPrint('❌ Splash Screen Error: $e');
+      
       if (mounted) {
-        debugPrint('🔄 Yeniden deneniyor...');
-        setState(() => _hasError = false);
-        _initializeApp();
+        setState(() {
+          _hasError = true;
+          _statusMessage = 'Bir hata oluştu. Yeniden deneniyor...';
+        });
+
+        // Auto-retry after 3 seconds
+        await Future.delayed(const Duration(seconds: 3));
+        
+        if (mounted) {
+          debugPrint('🔄 Retrying initialization...');
+          setState(() {
+            _hasError = false;
+            _statusMessage = 'Yeniden deneniyor...';
+          });
+          _initializeApp();
+        }
       }
     }
   }
@@ -153,6 +258,10 @@ class _SplashScreenState extends State<SplashScreen>
     _animationController.dispose();
     super.dispose();
   }
+
+  // ============================================
+  // BUILD METHOD
+  // ============================================
 
   @override
   Widget build(BuildContext context) {
@@ -173,7 +282,9 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo animation
+                // ============================================
+                // LOGO ANIMATION
+                // ============================================
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: ScaleTransition(
@@ -187,18 +298,32 @@ class _SplashScreenState extends State<SplashScreen>
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 20,
+                            blurRadius: 30,
                             offset: const Offset(0, 10),
+                            spreadRadius: 5,
                           ),
                         ],
                       ),
-                      child: const Center(
-                        child: Text(
-                          'Y',
-                          style: TextStyle(
-                            fontSize: 80,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF009DE0),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(30),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Image.asset(
+                            'assets/images/logo.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              // Fallback if logo not found
+                              return const Center(
+                                child: Text(
+                                  'Y',
+                                  style: TextStyle(
+                                    fontSize: 80,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF009DE0),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -242,12 +367,31 @@ class _SplashScreenState extends State<SplashScreen>
                 if (!_hasError)
                   const CircularProgressIndicator(
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    strokeWidth: 3,
                   )
                 else
-                  const Icon(
-                    Icons.error_outline,
-                    color: Color(0xFFFF6B6B),
-                    size: 48,
+                  Column(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: Color(0xFFFF6B6B),
+                        size: 48,
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _hasError = false;
+                            _statusMessage = 'Yeniden deneniyor...';
+                          });
+                          _initializeApp();
+                        },
+                        child: const Text(
+                          'Manuel Yeniden Dene',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
                   ),
 
                 const SizedBox(height: 20),
@@ -262,8 +406,22 @@ class _SplashScreenState extends State<SplashScreen>
                       color: _hasError
                           ? const Color(0xFFFF6B6B)
                           : Colors.white70,
+                      fontWeight: FontWeight.w500,
                     ),
                     textAlign: TextAlign.center,
+                  ),
+                ),
+
+                // Version info
+                const SizedBox(height: 40),
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: const Text(
+                    'v1.0.0',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white38,
+                    ),
                   ),
                 ),
               ],
